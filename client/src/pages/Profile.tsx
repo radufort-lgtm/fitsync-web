@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Edit2, Check, Dumbbell, Clock, TrendingUp, Target } from "lucide-react";
+import { Edit2, Check, Dumbbell, Clock, TrendingUp, Target, LogOut } from "lucide-react";
 import type { WorkoutHistory } from "@shared/schema";
 
 const GOALS = ["Strength", "Muscle Gain", "Fat Loss", "Performance", "General Fitness", "Flexibility"];
@@ -21,7 +21,7 @@ function ftInToCm(ft: number, inches: number) { return Math.round((ft * 12 + inc
 function lbsToKg(lbs: number) { return Math.round(lbs * 0.4536 * 10) / 10; }
 
 export default function Profile() {
-  const { currentUser, setCurrentUser } = useApp();
+  const { currentUser, setCurrentUser, logout } = useApp();
   const { toast } = useToast();
   const [editing, setEditing] = useState(false);
   const [editName, setEditName] = useState("");
@@ -225,6 +225,16 @@ export default function Profile() {
             ))}
           </div>
         </div>
+
+        {/* Log Out */}
+        <Button
+          variant="outline"
+          className="w-full border-destructive/30 text-destructive hover:bg-destructive/10"
+          onClick={() => { logout(); }}
+        >
+          <LogOut className="w-4 h-4 mr-2" />
+          Log Out
+        </Button>
 
         {/* Muscle Breakdown */}
         {muscleEntries.length > 0 && (

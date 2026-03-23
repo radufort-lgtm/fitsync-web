@@ -25,8 +25,17 @@ if (typeof document !== "undefined") {
 const MAIN_TABS = ["/dashboard", "/history", "/friends", "/profile"];
 
 function AppRouter() {
-  const { currentUser } = useApp();
+  const { currentUser, authLoading } = useApp();
   const [location] = useLocation();
+
+  // While validating the stored session, show nothing to prevent flash
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-8 h-8 border-3 border-primary/30 border-t-primary rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   // Determine if bottom nav should show
   const showNav = MAIN_TABS.some(tab => location === tab || location.startsWith(tab + "/"));

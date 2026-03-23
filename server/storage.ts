@@ -27,6 +27,7 @@ sqlite.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     username TEXT NOT NULL UNIQUE,
     display_name TEXT NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
     height_cm REAL,
     weight_kg REAL,
     goals TEXT NOT NULL DEFAULT '[]',
@@ -129,10 +130,18 @@ sqlite.exec(`
   DROP TABLE IF EXISTS friends;
 `);
 
+// Migration: add phone column if missing
+try {
+  sqlite.exec(`ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''`);
+} catch {
+  // column already exists
+}
+
 export interface IStorage {
   // Users
   getUser(id: number): Promise<User | undefined>;
   getUserByUsername(username: string): Promise<User | undefined>;
+  getUserByPhone(phone: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, updates: Partial<InsertUser>): Promise<User | undefined>;
 
@@ -197,6 +206,10 @@ export class DatabaseStorage implements IStorage {
     return db.select().from(users).where(eq(users.username, username)).get();
   }
 
+  async getUserByPhone(phone: string): Promise<User | undefined> {
+    return db.select().from(users).where(eq(users.phone, phone)).get();
+  }
+
   async createUser(insertUser: InsertUser): Promise<User> {
     return db.insert(users).values(insertUser).returning().get();
   }
@@ -240,7 +253,7 @@ export class DatabaseStorage implements IStorage {
   async getAcceptedFriends(userId: number): Promise<User[]> {
     // Raw SQL for the OR join condition
     const rows = sqlite.prepare(`
-      SELECT u.id, u.username, u.display_name, u.height_cm, u.weight_kg, u.goals, u.created_at
+      SELECT u.id, u.username, u.display_name, u.phone, u.height_cm, u.weight_kg, u.goals, u.created_at
       FROM users u
       INNER JOIN friend_requests fr ON
         (fr.from_user_id = ? AND fr.to_user_id = u.id AND fr.status = 'accepted')
@@ -251,6 +264,7 @@ export class DatabaseStorage implements IStorage {
       id: r.id,
       username: r.username,
       displayName: r.display_name,
+      phone: r.phone || "",
       heightCm: r.height_cm,
       weightKg: r.weight_kg,
       goals: r.goals,

@@ -7,6 +7,7 @@ export const users = sqliteTable("users", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   username: text("username").notNull().unique(),
   displayName: text("display_name").notNull(),
+  phone: text("phone").notNull().default(""),
   heightCm: real("height_cm"),
   weightKg: real("weight_kg"),
   goals: text("goals").notNull().default("[]"), // JSON string[]

@@ -140,6 +140,25 @@ export async function registerRoutes(
     console.log(`✅ Seeded ${SEED_EXERCISES.length} exercises`);
   }
 
+  // ── Auth / Login ──────────────────────────────────────────────────────────
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { phone } = req.body;
+      if (!phone) return res.status(400).json({ error: "Phone number is required" });
+
+      // Normalize phone: strip everything except digits
+      const normalized = phone.replace(/\D/g, "");
+      if (normalized.length < 7) return res.status(400).json({ error: "Invalid phone number" });
+
+      const user = await storage.getUserByPhone(normalized);
+      if (!user) return res.status(404).json({ error: "No account found with that phone number" });
+
+      return res.json(user);
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
+  });
+
   // ── Users ──────────────────────────────────────────────────────────────────
   app.post("/api/users", async (req, res) => {
     try {

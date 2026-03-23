@@ -36,6 +36,8 @@ interface AppContextValue {
   pendingInvite: PendingInvite | null;
   setPendingInvite: (invite: PendingInvite | null) => void;
   wsConnected: boolean;
+  logout: () => void;
+  authLoading: boolean;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -45,15 +47,65 @@ function getWsUrl() {
   return `${proto}//${window.location.host}/ws`;
 }
 
+// Persist / restore user from localStorage
+const STORAGE_KEY = "fitsync_user";
+
+function saveUserToStorage(user: User | null) {
+  if (user) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+  } else {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+}
+
+function loadUserFromStorage(): User | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [currentUser, setCurrentUserRaw] = useState<User | null>(loadUserFromStorage());
   const [activeWorkout, setActiveWorkout] = useState<ActiveWorkout | null>(null);
   const [isDark, setIsDark] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
   const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
   const [wsConnected, setWsConnected] = useState(false);
+  const [authLoading, setAuthLoading] = useState(!!loadUserFromStorage()); // true if we need to validate
   const wsRef = useRef<WebSocket | null>(null);
   const { toast } = useToast();
+
+  // Wrapped setter that also persists
+  const setCurrentUser = useCallback((user: User | null) => {
+    setCurrentUserRaw(user);
+    saveUserToStorage(user);
+  }, []);
+
+  const logout = useCallback(() => {
+    setCurrentUserRaw(null);
+    saveUserToStorage(null);
+    setActiveWorkout(null);
+  }, []);
+
+  // On mount, if we have a cached user, re-fetch from server to confirm they still exist
+  useEffect(() => {
+    const cached = loadUserFromStorage();
+    if (!cached) { setAuthLoading(false); return; }
+
+    apiRequest("GET", `/api/users/${cached.id}`)
+      .then((freshUser: User) => {
+        setCurrentUserRaw(freshUser);
+        saveUserToStorage(freshUser);
+      })
+      .catch(() => {
+        // User no longer exists on this server, clear
+        setCurrentUserRaw(null);
+        saveUserToStorage(null);
+      })
+      .finally(() => setAuthLoading(false));
+  }, []); // run once on mount
 
   // Apply dark class on mount
   if (typeof document !== "undefined") {
@@ -94,7 +146,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     ws.onopen = () => {
       setWsConnected(true);
-      // Register for notifications
       ws.send(JSON.stringify({ type: "register", username: currentUser.username }));
     };
 
@@ -135,7 +186,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     ws.onerror = () => {};
 
-    // Fetch initial unread count
     refreshNotifications();
 
     return () => {
@@ -157,6 +207,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       pendingInvite,
       setPendingInvite,
       wsConnected,
+      logout,
+      authLoading,
     }}>
       {children}
     </AppContext.Provider>
