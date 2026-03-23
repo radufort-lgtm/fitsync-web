@@ -28,12 +28,12 @@ function AppRouter() {
   const { currentUser, activeWorkout, authLoading } = useApp();
   const [location, navigate] = useLocation();
 
-  // If there's a persisted active workout and user lands elsewhere, redirect back
+  // If there's a persisted active workout and user lands on a main tab, redirect back
   useEffect(() => {
-    if (!authLoading && currentUser && activeWorkout && location !== "/workout/active") {
+    if (!authLoading && currentUser && activeWorkout && MAIN_TABS.some(t => location === t)) {
       navigate("/workout/active");
     }
-  }, [authLoading, currentUser, activeWorkout, location, navigate]);
+  }, [authLoading]); // only run once on load, not on every state change
 
   // While validating the stored session, show nothing to prevent flash
   if (authLoading) {

@@ -39,6 +39,32 @@ type WorkoutPhase = "waiting" | "weighIn" | "active" | "transition" | "rest" | "
 
 const SET_DURATION = 180; // 3 minutes
 const TRANSITION_DURATION = 10; // 10 seconds
+const PHASE_STORAGE_KEY = "fitsync_workout_phase";
+
+function savePhaseState(state: {
+  phase: string;
+  currentRound: number;
+  currentRotation: number;
+  setSecsLeft: number;
+  transitionSecsLeft: number;
+  restSecsLeft: number;
+  elapsedSecs: number;
+  transitionTarget: string;
+}) {
+  try { localStorage.setItem(PHASE_STORAGE_KEY, JSON.stringify(state)); } catch {}
+}
+
+function loadPhaseState(): any | null {
+  try {
+    const raw = localStorage.getItem(PHASE_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+}
+
+function clearPhaseState() {
+  try { localStorage.removeItem(PHASE_STORAGE_KEY); } catch {}
+}
 
 function formatTime(secs: number) {
   const h = Math.floor(secs / 3600);
@@ -90,19 +116,20 @@ export default function WorkoutActive() {
   const [, navigate] = useLocation();
   const toastRef = useRef(useToast());
 
-  // Core state
-  const [phase, setPhase] = useState<WorkoutPhase>("waiting");
-  const [elapsedSecs, setElapsedSecs] = useState(0);
-  const [setSecsLeft, setSetSecsLeft] = useState(SET_DURATION);
-  const [transitionSecsLeft, setTransitionSecsLeft] = useState(TRANSITION_DURATION);
-  const [restSecsLeft, setRestSecsLeft] = useState(0);
-  const [currentRound, setCurrentRound] = useState(0); // which round of the current rotation
-  const [currentRotation, setCurrentRotation] = useState(0); // which full rotation we're on
+  // Core state — restore from localStorage if available (survives remount/refresh)
+  const _saved = useRef(loadPhaseState());
+  const [phase, setPhase] = useState<WorkoutPhase>((_saved.current?.phase as WorkoutPhase) || "waiting");
+  const [elapsedSecs, setElapsedSecs] = useState(_saved.current?.elapsedSecs ?? 0);
+  const [setSecsLeft, setSetSecsLeft] = useState(_saved.current?.setSecsLeft ?? SET_DURATION);
+  const [transitionSecsLeft, setTransitionSecsLeft] = useState(_saved.current?.transitionSecsLeft ?? TRANSITION_DURATION);
+  const [restSecsLeft, setRestSecsLeft] = useState(_saved.current?.restSecsLeft ?? 0);
+  const [currentRound, setCurrentRound] = useState(_saved.current?.currentRound ?? 0);
+  const [currentRotation, setCurrentRotation] = useState(_saved.current?.currentRotation ?? 0);
   const [weight, setWeight] = useState("0");
   const [wsConnected, setWsConnected] = useState(false);
   const [inviteStatuses, setInviteStatuses] = useState<InviteStatus[]>([]);
   const [joinedUsers, setJoinedUsers] = useState<string[]>([]);
-  const [transitionTarget, setTransitionTarget] = useState<"rest" | "active">("rest");
+  const [transitionTarget, setTransitionTarget] = useState<"rest" | "active">((_saved.current?.transitionTarget as "rest" | "active") || "rest");
   // Track all user weights for display: { username: { stationIdx: weight } }
   const [userWeights, setUserWeights] = useState<Record<string, Record<number, string>>>({});
 
@@ -127,6 +154,20 @@ export default function WorkoutActive() {
     userWeights: {} as Record<string, Record<number, string>>,
   });
   stateRef.current = { phase, currentRound, currentRotation, setSecsLeft, transitionSecsLeft, restSecsLeft, elapsedSecs, transitionTarget, userWeights };
+
+  // Persist phase state to localStorage so it survives remounts/refreshes
+  // Throttle writes to at most once per second to avoid perf issues
+  const lastPersistRef = useRef(0);
+  useEffect(() => {
+    if (phase === "waiting" || phase === "complete") {
+      clearPhaseState();
+      return;
+    }
+    const now = Date.now();
+    if (now - lastPersistRef.current < 1000) return;
+    lastPersistRef.current = now;
+    savePhaseState({ phase, currentRound, currentRotation, setSecsLeft, transitionSecsLeft, restSecsLeft, elapsedSecs, transitionTarget });
+  }, [phase, currentRound, currentRotation, setSecsLeft, transitionSecsLeft, restSecsLeft, elapsedSecs, transitionTarget]);
 
   const workoutRef = useRef(activeWorkout);
   workoutRef.current = activeWorkout;
@@ -575,6 +616,7 @@ export default function WorkoutActive() {
 
   const handleEnd = () => {
     if (phase === "complete" || phase === "waiting") {
+      clearPhaseState();
       setActiveWorkout(null);
       navigate("/dashboard");
     } else {
