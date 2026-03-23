@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import {
   Play, Pause, Square, SkipForward, Trophy, Check,
-  ChevronRight, Timer, X, Wifi
+  ChevronRight, Timer, X, Wifi, Users, Clock, Loader2, UserCheck, UserX
 } from "lucide-react";
 import type { PlannedExercise, SetLog } from "@shared/schema";
 
@@ -24,7 +24,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-type WorkoutPhase = "pre" | "active" | "rest" | "paused" | "complete";
+type WorkoutPhase = "waiting" | "active" | "rest" | "paused" | "complete";
 
 function formatTime(secs: number) {
   const h = Math.floor(secs / 3600);
@@ -39,12 +39,17 @@ function getWsUrl() {
   return `${proto}//${window.location.host}/ws`;
 }
 
+interface InviteStatus {
+  username: string;
+  status: "pending" | "accepted" | "declined";
+}
+
 export default function WorkoutActive() {
   const { currentUser, activeWorkout, setActiveWorkout } = useApp();
   const [, navigate] = useLocation();
-  const { toast } = useToast();
+  const toastRef = useRef(useToast());
 
-  const [phase, setPhase] = useState<WorkoutPhase>("pre");
+  const [phase, setPhase] = useState<WorkoutPhase>("waiting");
   const [elapsedSecs, setElapsedSecs] = useState(0);
   const [restSecs, setRestSecs] = useState(0);
   const [exerciseIndex, setExerciseIndex] = useState(0);
@@ -54,26 +59,32 @@ export default function WorkoutActive() {
   const [completedSets, setCompletedSets] = useState<Record<string, SetLog[]>>({});
   const [totalVolume, setTotalVolume] = useState(0);
   const [wsConnected, setWsConnected] = useState(false);
+  const [inviteStatuses, setInviteStatuses] = useState<InviteStatus[]>([]);
+  const [joinedUsers, setJoinedUsers] = useState<string[]>([]);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsConnectedOnce = useRef(false);
 
-  // Use refs for state values that the heartbeat needs — avoids re-creating interval on every state change
-  const stateRef = useRef({ phase: "pre" as WorkoutPhase, exerciseIndex: 0, currentSetIndex: 0, restSecs: 0, totalVolume: 0, elapsedSecs: 0 });
+  // Use refs for state values that the heartbeat reads
+  const stateRef = useRef({ phase: "waiting" as WorkoutPhase, exerciseIndex: 0, currentSetIndex: 0, restSecs: 0, totalVolume: 0, elapsedSecs: 0 });
   stateRef.current = { phase, exerciseIndex, currentSetIndex, restSecs, totalVolume, elapsedSecs };
+
+  // Stable refs for workout data so effects don't re-run
+  const workoutRef = useRef(activeWorkout);
+  workoutRef.current = activeWorkout;
+  const userRef = useRef(currentUser);
+  userRef.current = currentUser;
 
   // Track if we've ever had an active workout to avoid premature redirect
   const hadWorkoutRef = useRef(false);
   if (activeWorkout) hadWorkoutRef.current = true;
 
-  // Redirect if no active workout — but give React time to propagate state first.
-  // On first mount, activeWorkout might not be set yet (state update from WorkoutNew
-  // may not have committed). So we delay the redirect check.
+  // Redirect guard
   const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    // Clear any pending redirect when activeWorkout becomes available
     if (activeWorkout) {
       if (redirectTimerRef.current) {
         clearTimeout(redirectTimerRef.current);
@@ -81,58 +92,42 @@ export default function WorkoutActive() {
       }
       return;
     }
-
-    // Only redirect if we never had an active workout AND it's been long enough
-    // for state to settle
     if (!hadWorkoutRef.current) {
       redirectTimerRef.current = setTimeout(() => {
-        // Re-check — activeWorkout may have arrived during the timeout
         if (!hadWorkoutRef.current) {
           navigate("/dashboard");
         }
       }, 500);
     }
-
     return () => {
       if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
     };
   }, [activeWorkout]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!activeWorkout || !currentUser) {
-    // Show nothing while waiting for state to arrive — don't flash or redirect yet
-    return null;
-  }
-
-  const exercises: PlannedExercise[] = activeWorkout.exercises;
-  const currentExercise = exercises[exerciseIndex];
-  const nextExercise = exercises[exerciseIndex + 1];
-  const totalExercises = exercises.length;
-  const overallProgress = Math.round((exerciseIndex / totalExercises) * 100);
-  const restDuration = activeWorkout.restBetweenSets;
-  const isCreator = activeWorkout.creatorUsername === currentUser.username;
-
-  // Stable send function — reads from ref, no deps that change
-  const sendStateUpdate = useCallback((overrides?: Record<string, any>) => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isCreator) return;
-    const s = stateRef.current;
-    wsRef.current.send(JSON.stringify({
-      type: "state-update",
-      sessionId: activeWorkout.sessionId,
-      payload: {
-        phase: s.phase,
-        exerciseIndex: s.exerciseIndex,
-        currentSetIndex: s.currentSetIndex,
-        restSecsRemaining: s.restSecs,
-        totalVolume: s.totalVolume,
-        elapsedSecs: s.elapsedSecs,
-        ...overrides,
-      },
-    }));
-  }, [isCreator, activeWorkout.sessionId]); // stable deps only
-
-  // WebSocket connection for shared workouts
+  // Fetch invite statuses for the waiting room (only for shared workouts, only once)
+  const fetchedInvites = useRef(false);
   useEffect(() => {
-    if (!activeWorkout.isShared) return;
+    if (!activeWorkout?.isShared || !activeWorkout?.sessionId || fetchedInvites.current) return;
+    fetchedInvites.current = true;
+
+    apiRequest("GET", `/api/workout-sessions/${activeWorkout.sessionId}/invites`)
+      .then((invites: any[]) => {
+        setInviteStatuses(invites.map(inv => ({
+          username: inv.toUsername,
+          status: inv.status as "pending" | "accepted" | "declined",
+        })));
+      })
+      .catch(() => {});
+  }, [activeWorkout?.isShared, activeWorkout?.sessionId]);
+
+  // Single stable WebSocket connection for shared workouts — connect ONCE
+  useEffect(() => {
+    if (!activeWorkout?.isShared || wsConnectedOnce.current) return;
+    wsConnectedOnce.current = true;
+
+    const aw = activeWorkout;
+    const user = currentUser;
+    if (!aw || !user) return;
 
     const ws = new WebSocket(getWsUrl());
     wsRef.current = ws;
@@ -141,16 +136,18 @@ export default function WorkoutActive() {
       setWsConnected(true);
       ws.send(JSON.stringify({
         type: "join",
-        sessionId: activeWorkout.sessionId,
-        username: currentUser.username,
+        sessionId: aw.sessionId,
+        username: user.username,
       }));
     };
 
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
+        const creatorUsername = workoutRef.current?.creatorUsername;
+        const isCreatorNow = creatorUsername === userRef.current?.username;
 
-        if (msg.type === "state-sync" && !isCreator) {
+        if (msg.type === "state-sync" && !isCreatorNow) {
           const p = msg.payload;
           setPhase(p.phase);
           setExerciseIndex(p.exerciseIndex);
@@ -161,14 +158,31 @@ export default function WorkoutActive() {
         }
 
         if (msg.type === "user-joined") {
-          toast({ title: `${msg.username} joined (${msg.participantCount} active)` });
+          setJoinedUsers(prev => {
+            if (prev.includes(msg.username)) return prev;
+            return [...prev, msg.username];
+          });
         }
 
         if (msg.type === "user-left") {
-          toast({ title: `${msg.username} left (${msg.participantCount} active)` });
+          setJoinedUsers(prev => prev.filter(u => u !== msg.username));
+        }
+
+        // Update invite statuses from WS messages
+        if (msg.type === "invite-accepted" || msg.type === "participant-joined") {
+          const u = msg.username;
+          setInviteStatuses(prev =>
+            prev.map(inv => inv.username === u ? { ...inv, status: "accepted" } : inv)
+          );
+        }
+        if (msg.type === "invite-declined") {
+          const u = msg.username;
+          setInviteStatuses(prev =>
+            prev.map(inv => inv.username === u ? { ...inv, status: "declined" } : inv)
+          );
         }
       } catch {
-        // ignore malformed
+        // ignore
       }
     };
 
@@ -179,37 +193,64 @@ export default function WorkoutActive() {
     return () => {
       ws.close();
       wsRef.current = null;
+      wsConnectedOnce.current = false;
     };
-  }, [activeWorkout.isShared, activeWorkout.sessionId, currentUser.username, isCreator]);
+  }, [activeWorkout?.isShared]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Creator heartbeat: send state every 3 seconds — stable, doesn't depend on changing state
+  // Stable send function
+  const sendStateUpdate = useCallback((overrides?: Record<string, any>) => {
+    const aw = workoutRef.current;
+    const user = userRef.current;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    if (!aw || !user || aw.creatorUsername !== user.username) return;
+    const s = stateRef.current;
+    wsRef.current.send(JSON.stringify({
+      type: "state-update",
+      sessionId: aw.sessionId,
+      payload: {
+        phase: s.phase,
+        exerciseIndex: s.exerciseIndex,
+        currentSetIndex: s.currentSetIndex,
+        restSecsRemaining: s.restSecs,
+        totalVolume: s.totalVolume,
+        elapsedSecs: s.elapsedSecs,
+        ...overrides,
+      },
+    }));
+  }, []); // truly stable — reads everything from refs
+
+  // Creator heartbeat: send state every 3 seconds
   useEffect(() => {
-    if (!activeWorkout.isShared || !isCreator) return;
+    if (!activeWorkout?.isShared) return;
+    const isCreatorNow = activeWorkout?.creatorUsername === currentUser?.username;
+    if (!isCreatorNow) return;
 
     heartbeatRef.current = setInterval(() => {
       const s = stateRef.current;
-      if (s.phase === "pre" || s.phase === "complete") return;
+      if (s.phase === "waiting" || s.phase === "complete") return;
       sendStateUpdate();
     }, 3000);
 
     return () => {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
     };
-  }, [activeWorkout.isShared, isCreator, sendStateUpdate]);
+  }, [activeWorkout?.isShared, activeWorkout?.creatorUsername, currentUser?.username, sendStateUpdate]);
 
-  // Elapsed timer (only for creator in shared workouts, always for solo)
+  // Elapsed timer
   useEffect(() => {
-    if (phase === "active" && (isCreator || !activeWorkout.isShared)) {
+    const isCreatorNow = activeWorkout?.creatorUsername === currentUser?.username;
+    if (phase === "active" && (isCreatorNow || !activeWorkout?.isShared)) {
       timerRef.current = setInterval(() => setElapsedSecs(s => s + 1), 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [phase, isCreator, activeWorkout.isShared]);
+  }, [phase, activeWorkout?.creatorUsername, activeWorkout?.isShared, currentUser?.username]);
 
-  // Rest countdown (only for creator in shared workouts, always for solo)
+  // Rest countdown
   useEffect(() => {
-    if (phase === "rest" && (isCreator || !activeWorkout.isShared)) {
+    const isCreatorNow = activeWorkout?.creatorUsername === currentUser?.username;
+    if (phase === "rest" && (isCreatorNow || !activeWorkout?.isShared)) {
       restTimerRef.current = setInterval(() => {
         setRestSecs(s => {
           if (s <= 1) {
@@ -222,7 +263,22 @@ export default function WorkoutActive() {
       }, 1000);
     }
     return () => { if (restTimerRef.current) clearInterval(restTimerRef.current); };
-  }, [phase, isCreator, activeWorkout.isShared]);
+  }, [phase, activeWorkout?.creatorUsername, activeWorkout?.isShared, currentUser?.username]);
+
+  if (!activeWorkout || !currentUser) {
+    return null;
+  }
+
+  const exercises: PlannedExercise[] = activeWorkout.exercises;
+  const currentExercise = exercises[exerciseIndex];
+  const nextExercise = exercises[exerciseIndex + 1];
+  const totalExercises = exercises.length;
+  const overallProgress = Math.round((exerciseIndex / totalExercises) * 100);
+  const restDuration = activeWorkout.restBetweenSets;
+  const isCreator = activeWorkout.creatorUsername === currentUser.username;
+  const isShared = activeWorkout.isShared;
+  // Invited friends (everyone except the creator)
+  const invitedFriends = activeWorkout.participantUsernames.filter(u => u !== activeWorkout.creatorUsername);
 
   const startWorkout = async () => {
     try {
@@ -236,7 +292,7 @@ export default function WorkoutActive() {
       }
       sendStateUpdate({ phase: "active" });
     } catch (e) {
-      toast({ title: "Failed to start session", variant: "destructive" });
+      toastRef.current.toast({ title: "Failed to start session", variant: "destructive" });
     }
   };
 
@@ -333,6 +389,9 @@ export default function WorkoutActive() {
     if (phase === "complete") {
       setActiveWorkout(null);
       navigate("/dashboard");
+    } else if (phase === "waiting") {
+      setActiveWorkout(null);
+      navigate("/dashboard");
     } else {
       setShowEndDialog(true);
     }
@@ -346,6 +405,13 @@ export default function WorkoutActive() {
 
   const restPct = restDuration > 0 ? ((restDuration - restSecs) / restDuration) * 100 : 0;
   const circumference = 2 * Math.PI * 54;
+
+  // Helper to get invite status for a friend
+  const getInviteStatus = (username: string): "pending" | "accepted" | "declined" | "joined" => {
+    if (joinedUsers.includes(username)) return "joined";
+    const inv = inviteStatuses.find(i => i.username === username);
+    return inv?.status || "pending";
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -393,7 +459,7 @@ export default function WorkoutActive() {
             onClick={handleEnd}
             className="w-9 h-9 flex items-center justify-center rounded-xl bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors press-scale"
           >
-            <Square className="w-4 h-4" />
+            {phase === "waiting" ? <X className="w-4 h-4" /> : <Square className="w-4 h-4" />}
           </button>
         </div>
       </div>
@@ -409,34 +475,132 @@ export default function WorkoutActive() {
 
       <div className="flex-1 px-4 py-4 overflow-y-auto pb-8">
         <AnimatePresence mode="wait">
-          {/* PRE-START */}
-          {phase === "pre" && (
+          {/* WAITING ROOM */}
+          {phase === "waiting" && (
             <motion.div
-              key="pre"
+              key="waiting"
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -20 }}
-              className="flex flex-col items-center justify-center min-h-[60vh] text-center"
+              className="flex flex-col items-center text-center"
             >
-              <motion.div
-                animate={{ scale: [1, 1.05, 1] }}
-                transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
-                className="w-24 h-24 bg-primary/10 rounded-3xl flex items-center justify-center mb-6"
-              >
-                <Play className="w-12 h-12 text-primary ml-1" />
-              </motion.div>
-              <h2 className="text-xl font-bold mb-2" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>Ready to train?</h2>
-              <p className="text-muted-foreground text-sm mb-2">{activeWorkout.planName}</p>
-              <p className="text-muted-foreground text-sm mb-8">{totalExercises} exercises</p>
-              <Button
-                data-testid="button-begin"
-                onClick={startWorkout}
-                size="lg"
-                className="w-full max-w-xs press-scale glow-primary"
-              >
-                <Play className="w-5 h-5 mr-2" />
-                Begin Workout
-              </Button>
+              {/* Workout info header */}
+              <div className="w-full bg-primary/5 border border-primary/15 rounded-2xl p-5 mb-6">
+                <h2 className="text-lg font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>
+                  {activeWorkout.planName}
+                </h2>
+                <div className="flex items-center justify-center gap-3 text-xs text-muted-foreground">
+                  <span className="flex items-center gap-1"><Clock className="w-3 h-3" />{totalExercises} exercises</span>
+                  {isShared && (
+                    <span className="flex items-center gap-1"><Users className="w-3 h-3" />{activeWorkout.participantUsernames.length} people</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Waiting room for shared workouts */}
+              {isShared && invitedFriends.length > 0 && (
+                <div className="w-full mb-6">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium mb-3 text-left">
+                    Invited Friends
+                  </p>
+                  <div className="space-y-2">
+                    {invitedFriends.map(username => {
+                      const status = getInviteStatus(username);
+                      return (
+                        <div
+                          key={username}
+                          className={`flex items-center gap-3 p-3.5 rounded-xl border transition-all ${
+                            status === "joined" || status === "accepted"
+                              ? "border-green-500/30 bg-green-500/5"
+                              : status === "declined"
+                              ? "border-destructive/20 bg-destructive/5"
+                              : "border-border bg-card"
+                          }`}
+                        >
+                          <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
+                            status === "joined" || status === "accepted"
+                              ? "bg-green-500/20"
+                              : status === "declined"
+                              ? "bg-destructive/10"
+                              : "bg-primary/15"
+                          }`}>
+                            {status === "joined" || status === "accepted" ? (
+                              <UserCheck className="w-4 h-4 text-green-400" />
+                            ) : status === "declined" ? (
+                              <UserX className="w-4 h-4 text-destructive" />
+                            ) : (
+                              <span className="text-primary font-bold text-sm">
+                                {username[0]?.toUpperCase()}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex-1 text-left">
+                            <div className="font-medium text-sm">@{username}</div>
+                          </div>
+                          <div className="flex-shrink-0">
+                            {status === "joined" ? (
+                              <span className="text-xs font-medium text-green-400 flex items-center gap-1">
+                                <Wifi className="w-3 h-3" /> Joined
+                              </span>
+                            ) : status === "accepted" ? (
+                              <span className="text-xs font-medium text-green-400">Accepted</span>
+                            ) : status === "declined" ? (
+                              <span className="text-xs font-medium text-destructive">Declined</span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Waiting
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Solo or ready to start */}
+              {!isShared && (
+                <div className="mb-6">
+                  <motion.div
+                    animate={{ scale: [1, 1.05, 1] }}
+                    transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+                    className="w-20 h-20 bg-primary/10 rounded-3xl flex items-center justify-center mx-auto mb-4"
+                  >
+                    <Play className="w-10 h-10 text-primary ml-1" />
+                  </motion.div>
+                </div>
+              )}
+
+              {/* Begin button */}
+              {isCreator && (
+                <Button
+                  data-testid="button-begin"
+                  onClick={startWorkout}
+                  size="lg"
+                  className="w-full max-w-xs press-scale glow-primary"
+                >
+                  <Play className="w-5 h-5 mr-2" />
+                  {isShared ? "Start for Everyone" : "Begin Workout"}
+                </Button>
+              )}
+
+              {!isCreator && (
+                <div className="text-center">
+                  <div className="w-16 h-16 bg-secondary rounded-2xl flex items-center justify-center mx-auto mb-4">
+                    <Loader2 className="w-8 h-8 text-muted-foreground animate-spin" />
+                  </div>
+                  <p className="text-muted-foreground text-sm">Waiting for @{activeWorkout.creatorUsername} to start...</p>
+                </div>
+              )}
+
+              {/* Connection status for shared */}
+              {isShared && (
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-4">
+                  <Wifi className={`w-3 h-3 ${wsConnected ? "text-green-400" : "text-red-400"}`} />
+                  <span>{wsConnected ? "Connected" : "Connecting..."}</span>
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -541,7 +705,7 @@ export default function WorkoutActive() {
               )}
 
               {/* Group rotation info */}
-              {activeWorkout.isShared && (
+              {isShared && (
                 <div className="bg-chart-2/10 border border-chart-2/20 rounded-xl p-3">
                   <div className="flex items-center gap-2 text-xs text-chart-2">
                     <Trophy className="w-3.5 h-3.5" />
