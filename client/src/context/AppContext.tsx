@@ -103,30 +103,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         if (msg.type === "friend-request") {
           toast({ title: "Friend Request", description: `@${msg.fromUsername} wants to be friends` });
           refreshNotifications();
-          queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser.id, "friend-requests"] });
         }
 
         if (msg.type === "friend-accepted") {
           toast({ title: "Friend Accepted", description: `@${msg.username} accepted your request` });
           refreshNotifications();
-          queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser.id, "friends"] });
-          queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser.id, "friend-requests-sent"] });
         }
 
         if (msg.type === "workout-invite") {
           toast({ title: "Workout Invite", description: `@${msg.fromUsername} invited you to ${msg.planName}` });
           refreshNotifications();
-          queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser.username, "workout-invites"] });
         }
 
         if (msg.type === "invite-accepted") {
           toast({ title: "Invite Accepted", description: `@${msg.username} joined your workout` });
-          queryClient.invalidateQueries({ queryKey: ["/api/workout-sessions", msg.sessionId, "invites"] });
         }
 
         if (msg.type === "invite-declined") {
           toast({ title: "Invite Declined", description: `@${msg.username} declined your workout invite` });
-          queryClient.invalidateQueries({ queryKey: ["/api/workout-sessions", msg.sessionId, "invites"] });
         }
       } catch {
         // ignore
