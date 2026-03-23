@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
 import { useApp } from "@/context/AppContext";
@@ -10,9 +10,9 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft, ChevronRight, Users, Dumbbell, Zap, Settings,
   ClipboardList, Plus, Minus, RefreshCw, X, Check, Loader2,
-  Brain, Clock, Flame, Target
+  Brain, Clock, Flame, Target, Search, ListChecks
 } from "lucide-react";
-import type { PlannedExercise, User } from "@shared/schema";
+import type { PlannedExercise, User, Exercise } from "@shared/schema";
 
 const WORKOUT_TYPES = [
   { id: "Weight Training", label: "Weight Training", emoji: "🏋️", desc: "Barbells, dumbbells & machines" },
@@ -36,7 +36,12 @@ const intensityColors: Record<string, string> = {
   Extreme: "text-chart-5 border-chart-5/40 bg-chart-5/10",
 };
 
-const STEP_LABELS = ["Group", "Friends", "Type", "Equipment", "Settings", "Review"];
+const MUSCLE_GROUPS = [
+  "All", "Chest", "Back", "Shoulders", "Biceps", "Triceps",
+  "Quads", "Hamstrings", "Glutes", "Core", "Calves", "Forearms"
+];
+
+const STEP_LABELS = ["Group", "Friends", "Type", "Equipment", "Settings", "Exercises", "Review"];
 
 interface WorkoutConfig {
   groupSize: number;
@@ -71,6 +76,8 @@ export default function WorkoutNew() {
   const [generatedPlan, setGeneratedPlan] = useState<GeneratedPlan | null>(null);
   const [generating, setGenerating] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [exerciseSearch, setExerciseSearch] = useState("");
+  const [muscleFilter, setMuscleFilter] = useState("All");
 
   const { currentUser, setActiveWorkout } = useApp();
   const [, navigate] = useLocation();
@@ -80,6 +87,12 @@ export default function WorkoutNew() {
     queryKey: ["/api/users", currentUser?.id, "friends"],
     queryFn: () => apiRequest("GET", `/api/users/${currentUser?.id}/friends`),
     enabled: !!currentUser?.id,
+  });
+
+  // Fetch all available exercises from the database
+  const { data: allExercises = [] } = useQuery<Exercise[]>({
+    queryKey: ["/api/exercises"],
+    queryFn: () => apiRequest("GET", "/api/exercises"),
   });
 
   // Skip friends step if solo
@@ -93,6 +106,25 @@ export default function WorkoutNew() {
     if (config.groupSize === 1 && displayStep >= 1) return displayStep + 1;
     return displayStep;
   };
+
+  // Filtered exercises for the picker
+  const filteredExercises = useMemo(() => {
+    let list = allExercises;
+
+    if (muscleFilter !== "All") {
+      list = list.filter(ex => ex.primaryMuscle === muscleFilter);
+    }
+
+    if (exerciseSearch.trim()) {
+      const q = exerciseSearch.toLowerCase();
+      list = list.filter(ex =>
+        ex.name.toLowerCase().includes(q) ||
+        ex.primaryMuscle.toLowerCase().includes(q)
+      );
+    }
+
+    return list;
+  }, [allExercises, muscleFilter, exerciseSearch]);
 
   const generatePlan = async () => {
     if (!currentUser) return;
@@ -116,9 +148,47 @@ export default function WorkoutNew() {
     }
   };
 
+  const isExerciseInPlan = (exerciseId: number) => {
+    return generatedPlan?.exercises.some(e => e.exerciseId === exerciseId) ?? false;
+  };
+
+  const goalParams: Record<string, { sets: number; reps: number }> = {
+    "Strength": { sets: 4, reps: 5 },
+    "Muscle Gain": { sets: 3, reps: 10 },
+    "Fat Loss": { sets: 3, reps: 13 },
+    "Performance": { sets: 3, reps: 8 },
+    "General Fitness": { sets: 3, reps: 10 },
+  };
+
+  const addExerciseToPlan = (exercise: Exercise) => {
+    if (!generatedPlan) return;
+    const { sets, reps } = goalParams[config.goal] || { sets: 3, reps: 10 };
+    const newEx: PlannedExercise = {
+      exerciseId: exercise.id,
+      exerciseName: exercise.name,
+      primaryMuscle: exercise.primaryMuscle,
+      sets,
+      reps,
+      weight: 0,
+      restSeconds: config.restBetweenSets,
+    };
+    setGeneratedPlan({
+      ...generatedPlan,
+      exercises: [...generatedPlan.exercises, newEx],
+    });
+  };
+
+  const removeExerciseFromPlan = (exerciseId: number) => {
+    if (!generatedPlan) return;
+    setGeneratedPlan({
+      ...generatedPlan,
+      exercises: generatedPlan.exercises.filter(e => e.exerciseId !== exerciseId),
+    });
+  };
+
   const handleNext = async () => {
-    const isLastBeforeReview = step === stepLabels.length - 2;
-    if (isLastBeforeReview && !generatedPlan) {
+    const isSettingsStep = stepLabels[step] === "Settings";
+    if (isSettingsStep && !generatedPlan) {
       await generatePlan();
     }
     if (step < stepLabels.length - 1) {
@@ -133,6 +203,10 @@ export default function WorkoutNew() {
 
   const handleStartWorkout = async () => {
     if (!currentUser || !generatedPlan) return;
+    if (generatedPlan.exercises.length === 0) {
+      toast({ title: "Add at least one exercise", variant: "destructive" });
+      return;
+    }
     setStarting(true);
     try {
       // Save plan
@@ -203,6 +277,7 @@ export default function WorkoutNew() {
   };
 
   const actual = getActualStep(step);
+  const currentStepLabel = stepLabels[step];
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -561,12 +636,16 @@ export default function WorkoutNew() {
               </div>
             )}
 
-            {/* Step 5: Review */}
+            {/* Step 5: Exercise Picker */}
             {actual === 5 && (
               <div>
                 <div className="mb-4">
-                  <h2 className="text-xl font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>Your Workout</h2>
-                  <p className="text-muted-foreground text-sm">AI-generated plan, ready to start.</p>
+                  <h2 className="text-xl font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>Pick Exercises</h2>
+                  <p className="text-muted-foreground text-sm">
+                    {generating ? "Generating your workout..." :
+                     generatedPlan ? `${generatedPlan.exercises.length} selected — tap to add or remove.` :
+                     "Loading..."}
+                  </p>
                 </div>
 
                 {generating ? (
@@ -575,8 +654,8 @@ export default function WorkoutNew() {
                       <Brain className="w-8 h-8 text-primary animate-pulse" />
                     </div>
                     <div className="text-center">
-                      <div className="font-semibold mb-1">Generating your workout...</div>
-                      <p className="text-sm text-muted-foreground">Analyzing your history & goals</p>
+                      <div className="font-semibold mb-1">Generating suggestions...</div>
+                      <p className="text-sm text-muted-foreground">Building your optimal workout</p>
                     </div>
                     <div className="flex gap-1">
                       {[0, 1, 2].map(i => (
@@ -590,6 +669,108 @@ export default function WorkoutNew() {
                     </div>
                   </div>
                 ) : generatedPlan ? (
+                  <div className="space-y-3">
+                    {/* Current selection summary */}
+                    {generatedPlan.exercises.length > 0 && (
+                      <div className="bg-primary/5 border border-primary/20 rounded-xl p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <ListChecks className="w-4 h-4 text-primary" />
+                          <span className="text-xs font-semibold text-primary uppercase tracking-wide">Your Workout ({generatedPlan.exercises.length})</span>
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {generatedPlan.exercises.map((ex, i) => (
+                            <button
+                              key={`selected-${ex.exerciseId}-${i}`}
+                              onClick={() => removeExerciseFromPlan(ex.exerciseId)}
+                              className="flex items-center gap-1 px-2.5 py-1 bg-primary/10 rounded-full text-xs font-medium text-primary border border-primary/20 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/20 transition-colors"
+                            >
+                              {ex.exerciseName}
+                              <X className="w-3 h-3 ml-0.5" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Search */}
+                    <div className="relative">
+                      <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        placeholder="Search exercises..."
+                        value={exerciseSearch}
+                        onChange={e => setExerciseSearch(e.target.value)}
+                        className="pl-9 bg-card"
+                      />
+                    </div>
+
+                    {/* Muscle group filter */}
+                    <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 no-scrollbar">
+                      {MUSCLE_GROUPS.map(mg => (
+                        <button
+                          key={mg}
+                          onClick={() => setMuscleFilter(mg)}
+                          className={`px-3 py-1.5 rounded-full border text-xs font-medium whitespace-nowrap transition-all ${
+                            muscleFilter === mg
+                              ? "border-primary bg-primary/15 text-primary"
+                              : "border-border bg-card text-muted-foreground hover:border-primary/40"
+                          }`}
+                        >
+                          {mg}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Exercise list */}
+                    <div className="space-y-1.5">
+                      {filteredExercises.map(ex => {
+                        const inPlan = isExerciseInPlan(ex.id);
+                        return (
+                          <button
+                            key={ex.id}
+                            onClick={() => inPlan ? removeExerciseFromPlan(ex.id) : addExerciseToPlan(ex)}
+                            className={`w-full flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
+                              inPlan
+                                ? "border-primary bg-primary/10"
+                                : "border-border bg-card hover:border-primary/30"
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                              inPlan ? "bg-primary" : "bg-secondary"
+                            }`}>
+                              {inPlan ? (
+                                <Check className="w-4 h-4 text-primary-foreground" />
+                              ) : (
+                                <Plus className="w-4 h-4 text-muted-foreground" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm truncate">{ex.name}</div>
+                              <div className="text-xs text-muted-foreground">{ex.primaryMuscle}{ex.isCompound ? " · Compound" : ""}</div>
+                            </div>
+                          </button>
+                        );
+                      })}
+
+                      {filteredExercises.length === 0 && (
+                        <div className="py-8 text-center text-muted-foreground text-sm">
+                          No exercises match your search.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
+            {/* Step 6: Review */}
+            {actual === 6 && (
+              <div>
+                <div className="mb-4">
+                  <h2 className="text-xl font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>Your Workout</h2>
+                  <p className="text-muted-foreground text-sm">Review and start.</p>
+                </div>
+
+                {generatedPlan ? (
                   <div className="space-y-4">
                     {/* Plan header */}
                     <div className="bg-primary/10 border border-primary/20 rounded-2xl p-4">
@@ -615,19 +796,11 @@ export default function WorkoutNew() {
                     <div>
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-sm font-semibold">Exercises</span>
-                        <button
-                          data-testid="button-regenerate"
-                          onClick={generatePlan}
-                          className="flex items-center gap-1.5 text-xs text-primary hover:opacity-80 transition-opacity"
-                        >
-                          <RefreshCw className="w-3 h-3" />
-                          Regenerate
-                        </button>
                       </div>
                       <div className="space-y-2">
                         {generatedPlan.exercises.map((ex, i) => (
                           <motion.div
-                            key={i}
+                            key={`${ex.exerciseId}-${i}`}
                             initial={{ opacity: 0, y: 8 }}
                             animate={{ opacity: 1, y: 0 }}
                             transition={{ delay: i * 0.05 }}
@@ -682,11 +855,11 @@ export default function WorkoutNew() {
 
       {/* Bottom Action */}
       <div className="fixed bottom-0 left-0 right-0 bg-background/95 backdrop-blur-sm border-t border-border p-4">
-        {actual === 5 && generatedPlan ? (
+        {actual === 6 && generatedPlan ? (
           <Button
             data-testid="button-start-workout"
             onClick={handleStartWorkout}
-            disabled={starting}
+            disabled={starting || generatedPlan.exercises.length === 0}
             size="lg"
             className="w-full press-scale glow-primary"
           >
@@ -708,7 +881,7 @@ export default function WorkoutNew() {
               <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" />Generating...</span>
             ) : (
               <span className="flex items-center gap-2">
-                {step === stepLabels.length - 2 ? "Generate Workout" : "Continue"}
+                {currentStepLabel === "Settings" ? "Generate Workout" : "Continue"}
                 <ChevronRight className="w-4 h-4" />
               </span>
             )}

@@ -60,12 +60,20 @@ export default function WorkoutActive() {
   const wsRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Redirect if no active workout
+  // Use refs for state values that the heartbeat needs — avoids re-creating interval on every state change
+  const stateRef = useRef({ phase: "pre" as WorkoutPhase, exerciseIndex: 0, currentSetIndex: 0, restSecs: 0, totalVolume: 0, elapsedSecs: 0 });
+  stateRef.current = { phase, exerciseIndex, currentSetIndex, restSecs, totalVolume, elapsedSecs };
+
+  // Track if we've ever had an active workout to avoid premature redirect
+  const hadWorkoutRef = useRef(!!activeWorkout);
+  if (activeWorkout) hadWorkoutRef.current = true;
+
+  // Redirect if no active workout — only after we've confirmed there never was one
   useEffect(() => {
-    if (!activeWorkout) {
+    if (!activeWorkout && !hadWorkoutRef.current) {
       navigate("/dashboard");
     }
-  }, [activeWorkout]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!activeWorkout || !currentUser) return null;
 
@@ -77,23 +85,24 @@ export default function WorkoutActive() {
   const restDuration = activeWorkout.restBetweenSets;
   const isCreator = activeWorkout.creatorUsername === currentUser.username;
 
-  // Send WebSocket state update (creator only)
+  // Stable send function — reads from ref, no deps that change
   const sendStateUpdate = useCallback((overrides?: Record<string, any>) => {
     if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isCreator) return;
+    const s = stateRef.current;
     wsRef.current.send(JSON.stringify({
       type: "state-update",
       sessionId: activeWorkout.sessionId,
       payload: {
-        phase,
-        exerciseIndex,
-        currentSetIndex,
-        restSecsRemaining: restSecs,
-        totalVolume,
-        elapsedSecs,
+        phase: s.phase,
+        exerciseIndex: s.exerciseIndex,
+        currentSetIndex: s.currentSetIndex,
+        restSecsRemaining: s.restSecs,
+        totalVolume: s.totalVolume,
+        elapsedSecs: s.elapsedSecs,
         ...overrides,
       },
     }));
-  }, [phase, exerciseIndex, currentSetIndex, restSecs, totalVolume, elapsedSecs, isCreator, activeWorkout.sessionId]);
+  }, [isCreator, activeWorkout.sessionId]); // stable deps only
 
   // WebSocket connection for shared workouts
   useEffect(() => {
@@ -147,19 +156,20 @@ export default function WorkoutActive() {
     };
   }, [activeWorkout.isShared, activeWorkout.sessionId, currentUser.username, isCreator]);
 
-  // Creator heartbeat: send state every 3 seconds
+  // Creator heartbeat: send state every 3 seconds — stable, doesn't depend on changing state
   useEffect(() => {
     if (!activeWorkout.isShared || !isCreator) return;
-    if (phase === "pre" || phase === "complete") return;
 
     heartbeatRef.current = setInterval(() => {
+      const s = stateRef.current;
+      if (s.phase === "pre" || s.phase === "complete") return;
       sendStateUpdate();
     }, 3000);
 
     return () => {
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
     };
-  }, [activeWorkout.isShared, isCreator, phase, sendStateUpdate]);
+  }, [activeWorkout.isShared, isCreator, sendStateUpdate]);
 
   // Elapsed timer (only for creator in shared workouts, always for solo)
   useEffect(() => {
