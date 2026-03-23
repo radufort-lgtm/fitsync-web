@@ -12,7 +12,7 @@ import {
   ClipboardList, Plus, Minus, RefreshCw, X, Check, Loader2,
   Brain, Clock, Flame, Target
 } from "lucide-react";
-import type { PlannedExercise, Friend } from "@shared/schema";
+import type { PlannedExercise, User } from "@shared/schema";
 
 const WORKOUT_TYPES = [
   { id: "Weight Training", label: "Weight Training", emoji: "🏋️", desc: "Barbells, dumbbells & machines" },
@@ -76,7 +76,7 @@ export default function WorkoutNew() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
-  const { data: friends = [] } = useQuery<Friend[]>({
+  const { data: friends = [] } = useQuery<User[]>({
     queryKey: ["/api/users", currentUser?.id, "friends"],
     queryFn: () => apiRequest("GET", `/api/users/${currentUser?.id}/friends`),
     enabled: !!currentUser?.id,
@@ -159,6 +159,21 @@ export default function WorkoutNew() {
         isPaused: false,
         currentRotationIndex: 0,
       });
+
+      // Send workout invites for group workouts
+      if (config.participants.length > 0) {
+        for (const participant of config.participants) {
+          try {
+            await apiRequest("POST", "/api/workout-invites", {
+              sessionId: session.id,
+              fromUsername: currentUser.username,
+              toUsername: participant,
+            });
+          } catch (e) {
+            console.error(`Failed to invite ${participant}`, e);
+          }
+        }
+      }
 
       // Set active workout in context
       setActiveWorkout({
@@ -306,22 +321,22 @@ export default function WorkoutNew() {
                   </Button>
                 </div>
 
-                {/* From saved friends */}
-                {friends.length > 0 && (
+                {/* Select from accepted friends */}
+                {friends.length > 0 ? (
                   <div className="mb-4">
                     <p className="text-xs text-muted-foreground mb-2 uppercase tracking-wide font-medium">Your Friends</p>
                     <div className="space-y-2">
                       {friends.map(f => {
-                        const isAdded = config.participants.includes(f.friendUsername);
+                        const isAdded = config.participants.includes(f.username);
                         return (
                           <button
                             key={f.id}
-                            data-testid={`friend-${f.friendUsername}`}
+                            data-testid={`friend-${f.username}`}
                             onClick={() => {
                               if (isAdded) {
-                                setConfig(c => ({ ...c, participants: c.participants.filter(p => p !== f.friendUsername) }));
+                                setConfig(c => ({ ...c, participants: c.participants.filter(p => p !== f.username) }));
                               } else if (config.participants.length < config.groupSize - 1) {
-                                setConfig(c => ({ ...c, participants: [...c.participants, f.friendUsername] }));
+                                setConfig(c => ({ ...c, participants: [...c.participants, f.username] }));
                               }
                             }}
                             className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all press-scale ${
@@ -329,17 +344,22 @@ export default function WorkoutNew() {
                             }`}
                           >
                             <div className="w-9 h-9 bg-primary/20 rounded-full flex items-center justify-center flex-shrink-0">
-                              <span className="text-primary font-bold text-sm">{f.friendDisplayName[0].toUpperCase()}</span>
+                              <span className="text-primary font-bold text-sm">{f.displayName[0]?.toUpperCase()}</span>
                             </div>
                             <div className="flex-1 text-left">
-                              <div className="font-medium text-sm">{f.friendDisplayName}</div>
-                              <div className="text-xs text-muted-foreground">@{f.friendUsername}</div>
+                              <div className="font-medium text-sm">{f.displayName}</div>
+                              <div className="text-xs text-muted-foreground">@{f.username}</div>
                             </div>
                             {isAdded && <Check className="w-4 h-4 text-primary" />}
                           </button>
                         );
                       })}
                     </div>
+                  </div>
+                ) : (
+                  <div className="bg-card border border-border rounded-2xl p-6 text-center mb-4">
+                    <Users className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-40" />
+                    <p className="text-sm text-muted-foreground">No friends yet. Add friends from the Friends tab first.</p>
                   </div>
                 )}
 

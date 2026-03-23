@@ -1,0 +1,14 @@
+{
+  "name": "FitSync",
+  "short_name": "FitSync",
+  "description": "AI-powered workouts that adapt to you",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0a0f0f",
+  "theme_color": "#7dd8c8",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

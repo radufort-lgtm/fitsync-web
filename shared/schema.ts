@@ -17,18 +17,48 @@ export const insertUserSchema = createInsertSchema(users).omit({ id: true, creat
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type User = typeof users.$inferSelect;
 
-// ── Friends ──────────────────────────────────────────────────────────────────
-export const friends = sqliteTable("friends", {
+// ── Friend Requests ──────────────────────────────────────────────────────────
+export const friendRequests = sqliteTable("friend_requests", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-  userId: integer("user_id").notNull(),
-  friendUsername: text("friend_username").notNull(),
-  friendDisplayName: text("friend_display_name").notNull(),
-  addedAt: text("added_at").notNull().default(new Date().toISOString()),
+  fromUserId: integer("from_user_id").notNull(),
+  toUserId: integer("to_user_id").notNull(),
+  status: text("status").notNull().default("pending"), // pending | accepted | declined
+  createdAt: text("created_at").notNull().default(new Date().toISOString()),
 });
 
-export const insertFriendSchema = createInsertSchema(friends).omit({ id: true, addedAt: true });
-export type InsertFriend = z.infer<typeof insertFriendSchema>;
-export type Friend = typeof friends.$inferSelect;
+export const insertFriendRequestSchema = createInsertSchema(friendRequests).omit({ id: true, createdAt: true });
+export type InsertFriendRequest = z.infer<typeof insertFriendRequestSchema>;
+export type FriendRequest = typeof friendRequests.$inferSelect;
+
+// ── Workout Invites ──────────────────────────────────────────────────────────
+export const workoutInvites = sqliteTable("workout_invites", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  sessionId: integer("session_id").notNull(),
+  fromUsername: text("from_username").notNull(),
+  toUsername: text("to_username").notNull(),
+  status: text("status").notNull().default("pending"), // pending | accepted | declined
+  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+});
+
+export const insertWorkoutInviteSchema = createInsertSchema(workoutInvites).omit({ id: true, createdAt: true });
+export type InsertWorkoutInvite = z.infer<typeof insertWorkoutInviteSchema>;
+export type WorkoutInvite = typeof workoutInvites.$inferSelect;
+
+// ── Notifications ────────────────────────────────────────────────────────────
+export const notifications = sqliteTable("notifications", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  userId: integer("user_id").notNull(),
+  type: text("type").notNull(), // friend_request | workout_invite | friend_accepted
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  relatedId: integer("related_id"),
+  isRead: integer("is_read", { mode: "boolean" }).notNull().default(false),
+  createdAt: text("created_at").notNull().default(new Date().toISOString()),
+});
+
+export const insertNotificationSchema = createInsertSchema(notifications).omit({ id: true, createdAt: true });
+export type InsertNotification = z.infer<typeof insertNotificationSchema>;
+export type Notification = typeof notifications.$inferSelect;
 
 // ── Exercises ────────────────────────────────────────────────────────────────
 export const exercises = sqliteTable("exercises", {
@@ -75,7 +105,7 @@ export const workoutSessions = sqliteTable("workout_sessions", {
   isShared: integer("is_shared", { mode: "boolean" }).notNull().default(false),
   startedAt: text("started_at"),
   completedAt: text("completed_at"),
-  status: text("status").notNull().default("pending"), // pending | active | paused | completed
+  status: text("status").notNull().default("pending"), // pending | waiting | active | paused | completed
   isPaused: integer("is_paused", { mode: "boolean" }).notNull().default(false),
   currentRotationIndex: integer("current_rotation_index").notNull().default(0),
 });

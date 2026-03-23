@@ -6,6 +6,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import FitSyncLogo from "@/components/FitSyncLogo";
+import NotificationBell from "@/components/NotificationBell";
 import {
   Dumbbell, Flame, TrendingUp, Clock, Users, ChevronRight,
   Zap, Brain, Moon, Sun, RotateCcw
@@ -163,13 +164,16 @@ export default function Dashboard() {
       {/* Header */}
       <header className="px-4 pt-12 pb-4 flex items-center justify-between">
         <FitSyncLogo />
-        <button
-          data-testid="button-theme-toggle"
-          onClick={toggleDark}
-          className="w-9 h-9 flex items-center justify-center rounded-xl bg-secondary text-muted-foreground hover:text-foreground transition-colors"
-        >
-          {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-        </button>
+        <div className="flex items-center gap-2">
+          <NotificationBell />
+          <button
+            data-testid="button-theme-toggle"
+            onClick={toggleDark}
+            className="w-9 h-9 flex items-center justify-center rounded-xl bg-secondary text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+        </div>
       </header>
 
       <div className="px-4 space-y-4">

@@ -1,8 +1,11 @@
 import {
-  users, friends, exercises, workoutPlans, workoutSessions,
+  users, friendRequests, workoutInvites, notifications,
+  exercises, workoutPlans, workoutSessions,
   exerciseLogs, workoutHistory,
   type User, type InsertUser,
-  type Friend, type InsertFriend,
+  type FriendRequest, type InsertFriendRequest,
+  type WorkoutInvite, type InsertWorkoutInvite,
+  type Notification, type InsertNotification,
   type Exercise, type InsertExercise,
   type WorkoutPlan, type InsertWorkoutPlan,
   type WorkoutSession, type InsertWorkoutSession,
@@ -11,7 +14,7 @@ import {
 } from "@shared/schema";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import Database from "better-sqlite3";
-import { eq, and, gte, desc } from "drizzle-orm";
+import { eq, and, or, gte, desc } from "drizzle-orm";
 
 const sqlite = new Database("data.db");
 sqlite.pragma("journal_mode = WAL");
@@ -30,12 +33,32 @@ sqlite.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
-  CREATE TABLE IF NOT EXISTS friends (
+  CREATE TABLE IF NOT EXISTS friend_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    from_user_id INTEGER NOT NULL,
+    to_user_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS workout_invites (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id INTEGER NOT NULL,
+    from_username TEXT NOT NULL,
+    to_username TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS notifications (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
-    friend_username TEXT NOT NULL,
-    friend_display_name TEXT NOT NULL,
-    added_at TEXT NOT NULL DEFAULT (datetime('now'))
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    related_id INTEGER,
+    is_read INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
   CREATE TABLE IF NOT EXISTS exercises (
@@ -101,6 +124,9 @@ sqlite.exec(`
     ai_reasoning TEXT NOT NULL DEFAULT '',
     completed_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+
+  -- Drop old friends table if it exists
+  DROP TABLE IF EXISTS friends;
 `);
 
 export interface IStorage {
@@ -110,10 +136,27 @@ export interface IStorage {
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: number, updates: Partial<InsertUser>): Promise<User | undefined>;
 
-  // Friends
-  getFriends(userId: number): Promise<Friend[]>;
-  addFriend(friend: InsertFriend): Promise<Friend>;
-  removeFriend(userId: number, friendUsername: string): Promise<void>;
+  // Friend Requests
+  createFriendRequest(fromUserId: number, toUserId: number): Promise<FriendRequest>;
+  getPendingFriendRequests(userId: number): Promise<(FriendRequest & { fromUser?: User; toUser?: User })[]>;
+  getSentFriendRequests(userId: number): Promise<(FriendRequest & { toUser?: User })[]>;
+  getAcceptedFriends(userId: number): Promise<User[]>;
+  updateFriendRequest(id: number, status: string): Promise<FriendRequest | undefined>;
+  removeFriendRequest(id: number): Promise<void>;
+  findExistingFriendRequest(fromUserId: number, toUserId: number): Promise<FriendRequest | undefined>;
+
+  // Workout Invites
+  createWorkoutInvite(invite: InsertWorkoutInvite): Promise<WorkoutInvite>;
+  getWorkoutInvitesForUser(username: string): Promise<WorkoutInvite[]>;
+  updateWorkoutInvite(id: number, status: string): Promise<WorkoutInvite | undefined>;
+  getWorkoutInvitesBySession(sessionId: number): Promise<WorkoutInvite[]>;
+
+  // Notifications
+  createNotification(notification: InsertNotification): Promise<Notification>;
+  getNotificationsForUser(userId: number): Promise<Notification[]>;
+  markNotificationRead(id: number): Promise<void>;
+  getUnreadNotificationCount(userId: number): Promise<number>;
+  markAllNotificationsRead(userId: number): Promise<void>;
 
   // Exercises
   getAllExercises(): Promise<Exercise[]>;
@@ -162,19 +205,120 @@ export class DatabaseStorage implements IStorage {
     return db.update(users).set(updates).where(eq(users.id, id)).returning().get();
   }
 
-  // ── Friends ────────────────────────────────────────────────────────────────
-  async getFriends(userId: number): Promise<Friend[]> {
-    return db.select().from(friends).where(eq(friends.userId, userId)).all();
+  // ── Friend Requests ────────────────────────────────────────────────────────
+  async createFriendRequest(fromUserId: number, toUserId: number): Promise<FriendRequest> {
+    return db.insert(friendRequests).values({ fromUserId, toUserId, status: "pending" }).returning().get();
   }
 
-  async addFriend(friend: InsertFriend): Promise<Friend> {
-    return db.insert(friends).values(friend).returning().get();
+  async getPendingFriendRequests(userId: number): Promise<(FriendRequest & { fromUser?: User })[]> {
+    const requests = db.select().from(friendRequests)
+      .where(and(eq(friendRequests.toUserId, userId), eq(friendRequests.status, "pending")))
+      .orderBy(desc(friendRequests.id)).all();
+
+    // Enrich with sender info
+    const enriched = [];
+    for (const req of requests) {
+      const fromUser = db.select().from(users).where(eq(users.id, req.fromUserId)).get();
+      enriched.push({ ...req, fromUser });
+    }
+    return enriched;
   }
 
-  async removeFriend(userId: number, friendUsername: string): Promise<void> {
-    db.delete(friends)
-      .where(and(eq(friends.userId, userId), eq(friends.friendUsername, friendUsername)))
-      .run();
+  async getSentFriendRequests(userId: number): Promise<(FriendRequest & { toUser?: User })[]> {
+    const requests = db.select().from(friendRequests)
+      .where(and(eq(friendRequests.fromUserId, userId), eq(friendRequests.status, "pending")))
+      .orderBy(desc(friendRequests.id)).all();
+
+    const enriched = [];
+    for (const req of requests) {
+      const toUser = db.select().from(users).where(eq(users.id, req.toUserId)).get();
+      enriched.push({ ...req, toUser });
+    }
+    return enriched;
+  }
+
+  async getAcceptedFriends(userId: number): Promise<User[]> {
+    // Raw SQL for the OR join condition
+    const rows = sqlite.prepare(`
+      SELECT u.id, u.username, u.display_name, u.height_cm, u.weight_kg, u.goals, u.created_at
+      FROM users u
+      INNER JOIN friend_requests fr ON
+        (fr.from_user_id = ? AND fr.to_user_id = u.id AND fr.status = 'accepted')
+        OR (fr.to_user_id = ? AND fr.from_user_id = u.id AND fr.status = 'accepted')
+    `).all(userId, userId) as any[];
+
+    return rows.map((r: any) => ({
+      id: r.id,
+      username: r.username,
+      displayName: r.display_name,
+      heightCm: r.height_cm,
+      weightKg: r.weight_kg,
+      goals: r.goals,
+      createdAt: r.created_at,
+    }));
+  }
+
+  async updateFriendRequest(id: number, status: string): Promise<FriendRequest | undefined> {
+    return db.update(friendRequests).set({ status }).where(eq(friendRequests.id, id)).returning().get();
+  }
+
+  async removeFriendRequest(id: number): Promise<void> {
+    db.delete(friendRequests).where(eq(friendRequests.id, id)).run();
+  }
+
+  async findExistingFriendRequest(fromUserId: number, toUserId: number): Promise<FriendRequest | undefined> {
+    // Check both directions
+    return db.select().from(friendRequests)
+      .where(
+        or(
+          and(eq(friendRequests.fromUserId, fromUserId), eq(friendRequests.toUserId, toUserId)),
+          and(eq(friendRequests.fromUserId, toUserId), eq(friendRequests.toUserId, fromUserId))
+        )
+      ).get();
+  }
+
+  // ── Workout Invites ────────────────────────────────────────────────────────
+  async createWorkoutInvite(invite: InsertWorkoutInvite): Promise<WorkoutInvite> {
+    return db.insert(workoutInvites).values(invite).returning().get();
+  }
+
+  async getWorkoutInvitesForUser(username: string): Promise<WorkoutInvite[]> {
+    return db.select().from(workoutInvites)
+      .where(and(eq(workoutInvites.toUsername, username), eq(workoutInvites.status, "pending")))
+      .orderBy(desc(workoutInvites.id)).all();
+  }
+
+  async updateWorkoutInvite(id: number, status: string): Promise<WorkoutInvite | undefined> {
+    return db.update(workoutInvites).set({ status }).where(eq(workoutInvites.id, id)).returning().get();
+  }
+
+  async getWorkoutInvitesBySession(sessionId: number): Promise<WorkoutInvite[]> {
+    return db.select().from(workoutInvites).where(eq(workoutInvites.sessionId, sessionId)).all();
+  }
+
+  // ── Notifications ──────────────────────────────────────────────────────────
+  async createNotification(notification: InsertNotification): Promise<Notification> {
+    return db.insert(notifications).values(notification).returning().get();
+  }
+
+  async getNotificationsForUser(userId: number): Promise<Notification[]> {
+    return db.select().from(notifications)
+      .where(eq(notifications.userId, userId))
+      .orderBy(desc(notifications.id)).all();
+  }
+
+  async markNotificationRead(id: number): Promise<void> {
+    db.update(notifications).set({ isRead: true }).where(eq(notifications.id, id)).run();
+  }
+
+  async getUnreadNotificationCount(userId: number): Promise<number> {
+    const rows = db.select().from(notifications)
+      .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false))).all();
+    return rows.length;
+  }
+
+  async markAllNotificationsRead(userId: number): Promise<void> {
+    db.update(notifications).set({ isRead: true }).where(eq(notifications.userId, userId)).run();
   }
 
   // ── Exercises ──────────────────────────────────────────────────────────────
@@ -187,7 +331,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getExercisesByEquipment(_equipment: string[]): Promise<Exercise[]> {
-    // Return all — filter in app code since SQLite JSON filtering is complex
     return db.select().from(exercises).all();
   }
 

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
 import { useApp } from "@/context/AppContext";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import {
   Play, Pause, Square, SkipForward, Trophy, Check,
-  ChevronRight, Timer, X
+  ChevronRight, Timer, X, Wifi
 } from "lucide-react";
 import type { PlannedExercise, SetLog } from "@shared/schema";
 
@@ -34,6 +34,11 @@ function formatTime(secs: number) {
   return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
+function getWsUrl() {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/ws`;
+}
+
 export default function WorkoutActive() {
   const { currentUser, activeWorkout, setActiveWorkout } = useApp();
   const [, navigate] = useLocation();
@@ -48,9 +53,12 @@ export default function WorkoutActive() {
   const [reps, setReps] = useState("10");
   const [completedSets, setCompletedSets] = useState<Record<string, SetLog[]>>({});
   const [totalVolume, setTotalVolume] = useState(0);
+  const [wsConnected, setWsConnected] = useState(false);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const restTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Redirect if no active workout
   useEffect(() => {
@@ -69,19 +77,103 @@ export default function WorkoutActive() {
   const restDuration = activeWorkout.restBetweenSets;
   const isCreator = activeWorkout.creatorUsername === currentUser.username;
 
-  // Elapsed timer
+  // Send WebSocket state update (creator only)
+  const sendStateUpdate = useCallback((overrides?: Record<string, any>) => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !isCreator) return;
+    wsRef.current.send(JSON.stringify({
+      type: "state-update",
+      sessionId: activeWorkout.sessionId,
+      payload: {
+        phase,
+        exerciseIndex,
+        currentSetIndex,
+        restSecsRemaining: restSecs,
+        totalVolume,
+        elapsedSecs,
+        ...overrides,
+      },
+    }));
+  }, [phase, exerciseIndex, currentSetIndex, restSecs, totalVolume, elapsedSecs, isCreator, activeWorkout.sessionId]);
+
+  // WebSocket connection for shared workouts
   useEffect(() => {
-    if (phase === "active") {
+    if (!activeWorkout.isShared) return;
+
+    const ws = new WebSocket(getWsUrl());
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      setWsConnected(true);
+      ws.send(JSON.stringify({
+        type: "join",
+        sessionId: activeWorkout.sessionId,
+        username: currentUser.username,
+      }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === "state-sync" && !isCreator) {
+          const p = msg.payload;
+          setPhase(p.phase);
+          setExerciseIndex(p.exerciseIndex);
+          setCurrentSetIndex(p.currentSetIndex);
+          setRestSecs(p.restSecsRemaining);
+          setTotalVolume(p.totalVolume);
+          setElapsedSecs(p.elapsedSecs);
+        }
+
+        if (msg.type === "user-joined") {
+          toast({ title: `${msg.username} joined (${msg.participantCount} active)` });
+        }
+
+        if (msg.type === "user-left") {
+          toast({ title: `${msg.username} left (${msg.participantCount} active)` });
+        }
+      } catch {
+        // ignore malformed
+      }
+    };
+
+    ws.onclose = () => {
+      setWsConnected(false);
+    };
+
+    return () => {
+      ws.close();
+      wsRef.current = null;
+    };
+  }, [activeWorkout.isShared, activeWorkout.sessionId, currentUser.username, isCreator]);
+
+  // Creator heartbeat: send state every 3 seconds
+  useEffect(() => {
+    if (!activeWorkout.isShared || !isCreator) return;
+    if (phase === "pre" || phase === "complete") return;
+
+    heartbeatRef.current = setInterval(() => {
+      sendStateUpdate();
+    }, 3000);
+
+    return () => {
+      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+    };
+  }, [activeWorkout.isShared, isCreator, phase, sendStateUpdate]);
+
+  // Elapsed timer (only for creator in shared workouts, always for solo)
+  useEffect(() => {
+    if (phase === "active" && (isCreator || !activeWorkout.isShared)) {
       timerRef.current = setInterval(() => setElapsedSecs(s => s + 1), 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
     }
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [phase]);
+  }, [phase, isCreator, activeWorkout.isShared]);
 
-  // Rest countdown
+  // Rest countdown (only for creator in shared workouts, always for solo)
   useEffect(() => {
-    if (phase === "rest") {
+    if (phase === "rest" && (isCreator || !activeWorkout.isShared)) {
       restTimerRef.current = setInterval(() => {
         setRestSecs(s => {
           if (s <= 1) {
@@ -94,7 +186,7 @@ export default function WorkoutActive() {
       }, 1000);
     }
     return () => { if (restTimerRef.current) clearInterval(restTimerRef.current); };
-  }, [phase]);
+  }, [phase, isCreator, activeWorkout.isShared]);
 
   const startWorkout = async () => {
     try {
@@ -106,6 +198,7 @@ export default function WorkoutActive() {
       if (currentExercise) {
         setReps(String(currentExercise.reps));
       }
+      sendStateUpdate({ phase: "active" });
     } catch (e) {
       toast({ title: "Failed to start session", variant: "destructive" });
     }
@@ -126,26 +219,28 @@ export default function WorkoutActive() {
       ...prev,
       [key]: [...(prev[key] || []), setLog],
     }));
-    setTotalVolume(v => v + w * r);
+    const newVolume = totalVolume + w * r;
+    setTotalVolume(newVolume);
 
     const setsLeft = currentExercise.sets - (currentSetIndex + 1);
     if (setsLeft > 0) {
-      // More sets for this exercise
-      setCurrentSetIndex(i => i + 1);
+      const newSetIndex = currentSetIndex + 1;
+      setCurrentSetIndex(newSetIndex);
       setRestSecs(restDuration);
       setPhase("rest");
+      sendStateUpdate({ phase: "rest", currentSetIndex: newSetIndex, restSecsRemaining: restDuration, totalVolume: newVolume });
     } else {
-      // Move to next exercise
       if (exerciseIndex + 1 < totalExercises) {
-        setExerciseIndex(i => i + 1);
+        const newExIdx = exerciseIndex + 1;
+        setExerciseIndex(newExIdx);
         setCurrentSetIndex(0);
-        const nextEx = exercises[exerciseIndex + 1];
+        const nextEx = exercises[newExIdx];
         if (nextEx) setReps(String(nextEx.reps));
         setWeight("0");
         setRestSecs(restDuration);
         setPhase("rest");
+        sendStateUpdate({ phase: "rest", exerciseIndex: newExIdx, currentSetIndex: 0, restSecsRemaining: restDuration, totalVolume: newVolume });
       } else {
-        // Done!
         finishWorkout();
       }
     }
@@ -154,13 +249,13 @@ export default function WorkoutActive() {
   const finishWorkout = async () => {
     setPhase("complete");
     if (timerRef.current) clearInterval(timerRef.current);
+    sendStateUpdate({ phase: "complete" });
     try {
       await apiRequest("PATCH", `/api/workout-sessions/${activeWorkout.sessionId}`, {
         status: "completed",
         completedAt: new Date().toISOString(),
       });
 
-      // Compute muscles worked
       const muscles = Array.from(new Set(exercises.map(e => e.primaryMuscle)));
 
       await apiRequest("POST", "/api/workout-history", {
@@ -176,7 +271,6 @@ export default function WorkoutActive() {
         aiReasoning: activeWorkout.aiReasoning,
       });
 
-      // Invalidate caches
       queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser.id, "workout-history"] });
       queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser.id, "workout-history-recent"] });
     } catch (e) {
@@ -188,9 +282,11 @@ export default function WorkoutActive() {
     if (!isCreator) return;
     if (phase === "active") {
       setPhase("paused");
+      sendStateUpdate({ phase: "paused" });
       await apiRequest("PATCH", `/api/workout-sessions/${activeWorkout.sessionId}`, { isPaused: true, status: "paused" });
     } else if (phase === "paused") {
       setPhase("active");
+      sendStateUpdate({ phase: "active" });
       await apiRequest("PATCH", `/api/workout-sessions/${activeWorkout.sessionId}`, { isPaused: false, status: "active" });
     }
   };
@@ -414,6 +510,10 @@ export default function WorkoutActive() {
                   <div className="flex items-center gap-2 text-xs text-chart-2">
                     <Trophy className="w-3.5 h-3.5" />
                     <span>Group workout · {activeWorkout.participantUsernames.join(", ")}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mt-1.5">
+                    <Wifi className={`w-3 h-3 ${wsConnected ? "text-green-400" : "text-red-400"}`} />
+                    <span>{wsConnected ? "Live sync active" : "Connecting..."}</span>
                   </div>
                 </div>
               )}

@@ -1,4 +1,4 @@
-import { Switch, Route, Router, useLocation } from "wouter";
+import { Switch, Route, Router, useLocation, Redirect } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -36,37 +36,36 @@ function AppRouter() {
     <>
       <Switch>
         <Route path="/" component={() => {
-          // If user exists, redirect to dashboard
           if (currentUser) {
-            window.location.hash = "#/dashboard";
-            return null;
+            return <Redirect to="/dashboard" />;
           }
           return <Onboarding />;
         }} />
         <Route path="/dashboard" component={() => {
-          if (!currentUser) { window.location.hash = "#/"; return null; }
+          if (!currentUser) return <Redirect to="/" />;
           return <Dashboard />;
         }} />
         <Route path="/workout/new" component={() => {
-          if (!currentUser) { window.location.hash = "#/"; return null; }
+          if (!currentUser) return <Redirect to="/" />;
           return <WorkoutNew />;
         }} />
         <Route path="/workout/active" component={() => {
-          if (!currentUser) { window.location.hash = "#/"; return null; }
+          if (!currentUser) return <Redirect to="/" />;
           return <WorkoutActive />;
         }} />
         <Route path="/history" component={() => {
-          if (!currentUser) { window.location.hash = "#/"; return null; }
+          if (!currentUser) return <Redirect to="/" />;
           return <History />;
         }} />
         <Route path="/friends" component={() => {
-          if (!currentUser) { window.location.hash = "#/"; return null; }
+          if (!currentUser) return <Redirect to="/" />;
           return <Friends />;
         }} />
         <Route path="/profile" component={() => {
-          if (!currentUser) { window.location.hash = "#/"; return null; }
+          if (!currentUser) return <Redirect to="/" />;
           return <Profile />;
         }} />
+        {/* Catch-all: show NotFound for truly unknown routes */}
         <Route component={NotFound} />
       </Switch>
       {showNav && !isWorkoutActive && <BottomNav />}

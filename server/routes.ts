@@ -1,8 +1,9 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertUserSchema, insertFriendSchema, type PlannedExercise, type InsertExercise, type Exercise } from "@shared/schema";
+import { insertUserSchema, type PlannedExercise, type InsertExercise, type Exercise } from "@shared/schema";
 import { z } from "zod";
+import { sendToUser, broadcastToSession } from "./websocket";
 
 // ── Exercise Seed Data ────────────────────────────────────────────────────────
 const SEED_EXERCISES: InsertExercise[] = [
@@ -249,24 +250,248 @@ export async function registerRoutes(
     }
   });
 
-  // ── Friends ────────────────────────────────────────────────────────────────
-  app.get("/api/users/:userId/friends", async (req, res) => {
-    const friends = await storage.getFriends(Number(req.params.userId));
-    return res.json(friends);
-  });
-
-  app.post("/api/users/:userId/friends", async (req, res) => {
+  // ── Friend Requests ────────────────────────────────────────────────────────
+  // Send a friend request
+  app.post("/api/friend-requests", async (req, res) => {
     try {
-      const body = insertFriendSchema.parse({ ...req.body, userId: Number(req.params.userId) });
-      const friend = await storage.addFriend(body);
-      return res.json(friend);
+      const { fromUserId, toUsername } = req.body;
+      if (!fromUserId || !toUsername) return res.status(400).json({ error: "Missing fromUserId or toUsername" });
+
+      const toUser = await storage.getUserByUsername(toUsername);
+      if (!toUser) return res.status(404).json({ error: "User not found" });
+
+      const fromUser = await storage.getUser(fromUserId);
+      if (!fromUser) return res.status(404).json({ error: "Sender not found" });
+
+      if (fromUserId === toUser.id) return res.status(400).json({ error: "You can't friend yourself" });
+
+      // Check for existing request in either direction
+      const existing = await storage.findExistingFriendRequest(fromUserId, toUser.id);
+      if (existing) {
+        if (existing.status === "accepted") return res.status(409).json({ error: "Already friends" });
+        if (existing.status === "pending") return res.status(409).json({ error: "Request already pending" });
+        // If declined, allow re-request by creating new one
+      }
+
+      const request = await storage.createFriendRequest(fromUserId, toUser.id);
+
+      // Create notification for recipient
+      await storage.createNotification({
+        userId: toUser.id,
+        type: "friend_request",
+        title: "Friend Request",
+        body: `${fromUser.displayName} (@${fromUser.username}) wants to be friends`,
+        relatedId: request.id,
+        isRead: false,
+      });
+
+      // Push via WebSocket
+      sendToUser(toUsername, {
+        type: "friend-request",
+        fromUsername: fromUser.username,
+        fromDisplayName: fromUser.displayName,
+        requestId: request.id,
+      });
+
+      return res.json(request);
     } catch (e: any) {
       return res.status(400).json({ error: e.message });
     }
   });
 
-  app.delete("/api/users/:userId/friends/:friendUsername", async (req, res) => {
-    await storage.removeFriend(Number(req.params.userId), req.params.friendUsername);
+  // Get pending incoming friend requests
+  app.get("/api/users/:userId/friend-requests", async (req, res) => {
+    const requests = await storage.getPendingFriendRequests(Number(req.params.userId));
+    return res.json(requests);
+  });
+
+  // Get sent (outgoing) friend requests
+  app.get("/api/users/:userId/friend-requests/sent", async (req, res) => {
+    const requests = await storage.getSentFriendRequests(Number(req.params.userId));
+    return res.json(requests);
+  });
+
+  // Get accepted friends (returns User[])
+  app.get("/api/users/:userId/friends", async (req, res) => {
+    const friends = await storage.getAcceptedFriends(Number(req.params.userId));
+    return res.json(friends);
+  });
+
+  // Accept or decline a friend request
+  app.patch("/api/friend-requests/:id", async (req, res) => {
+    try {
+      const { status } = req.body;
+      if (!status || !['accepted', 'declined'].includes(status)) {
+        return res.status(400).json({ error: "Status must be 'accepted' or 'declined'" });
+      }
+
+      const request = await storage.updateFriendRequest(Number(req.params.id), status);
+      if (!request) return res.status(404).json({ error: "Request not found" });
+
+      if (status === "accepted") {
+        // Notify the original sender
+        const fromUser = await storage.getUser(request.fromUserId);
+        const toUser = await storage.getUser(request.toUserId);
+        if (fromUser && toUser) {
+          await storage.createNotification({
+            userId: request.fromUserId,
+            type: "friend_accepted",
+            title: "Friend Request Accepted",
+            body: `${toUser.displayName} (@${toUser.username}) accepted your friend request`,
+            relatedId: request.id,
+            isRead: false,
+          });
+
+          sendToUser(fromUser.username, {
+            type: "friend-accepted",
+            username: toUser.username,
+            displayName: toUser.displayName,
+          });
+        }
+      }
+
+      return res.json(request);
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
+  });
+
+  // Remove a friend (delete the request)
+  app.delete("/api/friend-requests/:id", async (req, res) => {
+    await storage.removeFriendRequest(Number(req.params.id));
+    return res.json({ success: true });
+  });
+
+  // ── Workout Invites ────────────────────────────────────────────────────────
+  // Send a workout invite
+  app.post("/api/workout-invites", async (req, res) => {
+    try {
+      const { sessionId, fromUsername, toUsername } = req.body;
+      if (!sessionId || !fromUsername || !toUsername) {
+        return res.status(400).json({ error: "Missing required fields" });
+      }
+
+      const toUser = await storage.getUserByUsername(toUsername);
+      if (!toUser) return res.status(404).json({ error: "User not found" });
+
+      const session = await storage.getWorkoutSession(sessionId);
+      if (!session) return res.status(404).json({ error: "Session not found" });
+
+      const plan = await storage.getWorkoutPlan(session.planId);
+
+      const invite = await storage.createWorkoutInvite({
+        sessionId,
+        fromUsername,
+        toUsername,
+        status: "pending",
+      });
+
+      // Create notification
+      await storage.createNotification({
+        userId: toUser.id,
+        type: "workout_invite",
+        title: "Workout Invite",
+        body: `@${fromUsername} invited you to ${plan?.name || "a workout"}`,
+        relatedId: invite.id,
+        isRead: false,
+      });
+
+      // Push via WebSocket
+      sendToUser(toUsername, {
+        type: "workout-invite",
+        sessionId,
+        fromUsername,
+        planName: plan?.name || "Workout",
+        inviteId: invite.id,
+      });
+
+      return res.json(invite);
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
+  });
+
+  // Get pending workout invites for a user
+  app.get("/api/users/:username/workout-invites", async (req, res) => {
+    const invites = await storage.getWorkoutInvitesForUser(req.params.username);
+    return res.json(invites);
+  });
+
+  // Accept or decline a workout invite
+  app.patch("/api/workout-invites/:id", async (req, res) => {
+    try {
+      const { status } = req.body;
+      if (!status || !['accepted', 'declined'].includes(status)) {
+        return res.status(400).json({ error: "Status must be 'accepted' or 'declined'" });
+      }
+
+      const invite = await storage.updateWorkoutInvite(Number(req.params.id), status);
+      if (!invite) return res.status(404).json({ error: "Invite not found" });
+
+      if (status === "accepted") {
+        // Add participant to session
+        const session = await storage.getWorkoutSession(invite.sessionId);
+        if (session) {
+          const participants: string[] = JSON.parse(session.participantUsernames || "[]");
+          if (!participants.includes(invite.toUsername)) {
+            participants.push(invite.toUsername);
+            await storage.updateWorkoutSession(invite.sessionId, {
+              participantUsernames: JSON.stringify(participants),
+            } as any);
+          }
+
+          // Notify creator via WebSocket
+          sendToUser(invite.fromUsername, {
+            type: "invite-accepted",
+            sessionId: invite.sessionId,
+            username: invite.toUsername,
+          });
+
+          // Broadcast to session
+          broadcastToSession(invite.sessionId, {
+            type: "participant-joined",
+            username: invite.toUsername,
+          });
+        }
+      } else {
+        // Notify creator of decline
+        sendToUser(invite.fromUsername, {
+          type: "invite-declined",
+          sessionId: invite.sessionId,
+          username: invite.toUsername,
+        });
+      }
+
+      return res.json(invite);
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
+  });
+
+  // Get invites for a session
+  app.get("/api/workout-sessions/:sessionId/invites", async (req, res) => {
+    const invites = await storage.getWorkoutInvitesBySession(Number(req.params.sessionId));
+    return res.json(invites);
+  });
+
+  // ── Notifications ──────────────────────────────────────────────────────────
+  app.get("/api/users/:userId/notifications", async (req, res) => {
+    const notifs = await storage.getNotificationsForUser(Number(req.params.userId));
+    return res.json(notifs);
+  });
+
+  app.get("/api/users/:userId/notifications/unread-count", async (req, res) => {
+    const count = await storage.getUnreadNotificationCount(Number(req.params.userId));
+    return res.json({ count });
+  });
+
+  app.patch("/api/notifications/:id/read", async (req, res) => {
+    await storage.markNotificationRead(Number(req.params.id));
+    return res.json({ success: true });
+  });
+
+  app.post("/api/users/:userId/notifications/read-all", async (req, res) => {
+    await storage.markAllNotificationsRead(Number(req.params.userId));
     return res.json({ success: true });
   });
 
