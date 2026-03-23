@@ -1,3 +1,5 @@
+@import url('https://api.fontshare.com/v2/css?f[]=general-sans@400,500,600,700&f[]=cabinet-grotesk@400,500,700,800,900&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -9,44 +11,45 @@
   --opaque-button-border-intensity: -8;
   --elevate-1: rgba(0,0,0, .03);
   --elevate-2: rgba(0,0,0, .08);
-  --background: 0 0% 100%;
-  --foreground: 0 0% 9%;
-  --border: 0 0% 91%;
-  --card: 0 0% 98%;
-  --card-foreground: 0 0% 9%;
-  --card-border: 0 0% 94%;
-  --sidebar: 0 0% 96%;
-  --sidebar-foreground: 0 0% 9%;
-  --sidebar-border: 0 0% 92%;
-  --sidebar-primary: 221 83% 53%;
-  --sidebar-primary-foreground: 0 0% 98%;
-  --sidebar-accent: 0 0% 89%;
-  --sidebar-accent-foreground: 0 0% 9%;
-  --sidebar-ring: 221 83% 53%;
-  --popover: 0 0% 95%;
-  --popover-foreground: 0 0% 9%;
-  --popover-border: 0 0% 91%;
-  --primary: 221 83% 53%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 0 0% 92%;
-  --secondary-foreground: 0 0% 9%;
-  --muted: 0 0% 93%;
-  --muted-foreground: 0 0% 40%;
-  --accent: 220 14% 92%;
-  --accent-foreground: 0 0% 9%;
-  --destructive: 0 84% 42%;
+  --background: 192 15% 94%;
+  --foreground: 192 20% 10%;
+  --border: 192 8% 82%;
+  --card: 192 12% 96%;
+  --card-foreground: 192 20% 10%;
+  --card-border: 192 8% 88%;
+  --sidebar: 192 12% 96%;
+  --sidebar-foreground: 192 20% 15%;
+  --sidebar-border: 192 8% 82%;
+  --sidebar-primary: 186 85% 35%;
+  --sidebar-primary-foreground: 186 85% 98%;
+  --sidebar-accent: 192 8% 88%;
+  --sidebar-accent-foreground: 192 20% 15%;
+  --sidebar-ring: 186 85% 35%;
+  --popover: 192 12% 96%;
+  --popover-foreground: 192 20% 10%;
+  --popover-border: 192 8% 82%;
+  --primary: 186 85% 35%;
+  --primary-foreground: 186 85% 98%;
+  --secondary: 192 8% 88%;
+  --secondary-foreground: 192 20% 15%;
+  --muted: 192 8% 90%;
+  --muted-foreground: 192 8% 40%;
+  --accent: 192 8% 88%;
+  --accent-foreground: 192 20% 15%;
+  --destructive: 0 60% 50%;
   --destructive-foreground: 0 0% 98%;
-  --input: 0 0% 75%;
-  --ring: 221 83% 53%;
-  --chart-1: 221 83% 45%;
-  --chart-2: 262 83% 48%;
-  --chart-3: 173 58% 39%;
-  --chart-4: 43 74% 49%;
-  --chart-5: 27 87% 55%;
-  --font-sans: Open Sans, sans-serif;
+  --input: 192 8% 82%;
+  --ring: 186 85% 35%;
+  --chart-1: 186 50% 45%;
+  --chart-2: 250 40% 55%;
+  --chart-3: 140 45% 45%;
+  --chart-4: 40 70% 50%;
+  --chart-5: 0 55% 55%;
+  --font-sans: 'General Sans', sans-serif;
+  --font-display: 'Cabinet Grotesk', sans-serif;
   --font-serif: Georgia, serif;
   --font-mono: Menlo, monospace;
-  --radius: .5rem;
+  --radius: 0.75rem;
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-sm: 0px 2px 0px 0px hsl(0 0% 0% / 0.00), 0px 1px 2px -1px hsl(0 0% 0% / 0.00);
@@ -87,46 +90,47 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
+/* DARK MODE — PRIMARY (dark-first fitness app) */
 .dark {
   --button-outline: rgba(255,255,255, .10);
   --badge-outline: rgba(255,255,255, .05);
   --opaque-button-border-intensity: 9;
   --elevate-1: rgba(255,255,255, .04);
   --elevate-2: rgba(255,255,255, .09);
-  --background: 0 0% 7%;
-  --foreground: 0 0% 98%;
-  --border: 0 0% 16%;
-  --card: 0 0% 9%;
-  --card-foreground: 0 0% 98%;
-  --card-border: 0 0% 13%;
-  --sidebar: 0 0% 11%;
-  --sidebar-foreground: 0 0% 98%;
-  --sidebar-border: 0 0% 15%;
-  --sidebar-primary: 221 83% 53%;
-  --sidebar-primary-foreground: 0 0% 98%;
-  --sidebar-accent: 0 0% 16%;
-  --sidebar-accent-foreground: 0 0% 98%;
-  --sidebar-ring: 221 83% 53%;
-  --popover: 0 0% 13%;
-  --popover-foreground: 0 0% 98%;
-  --popover-border: 0 0% 17%;
-  --primary: 221 83% 53%;
-  --primary-foreground: 0 0% 98%;
-  --secondary: 0 0% 18%;
-  --secondary-foreground: 0 0% 98%;
-  --muted: 0 0% 19%;
-  --muted-foreground: 0 0% 65%;
-  --accent: 220 9% 17%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 84% 42%;
+  --background: 195 20% 6%;
+  --foreground: 192 10% 88%;
+  --border: 195 8% 18%;
+  --card: 195 15% 8%;
+  --card-foreground: 192 10% 88%;
+  --card-border: 195 8% 18%;
+  --sidebar: 195 20% 5%;
+  --sidebar-foreground: 192 10% 80%;
+  --sidebar-border: 195 8% 15%;
+  --sidebar-primary: 186 50% 70%;
+  --sidebar-primary-foreground: 195 40% 8%;
+  --sidebar-accent: 195 12% 12%;
+  --sidebar-accent-foreground: 192 10% 80%;
+  --sidebar-ring: 186 50% 60%;
+  --popover: 195 15% 10%;
+  --popover-foreground: 192 10% 88%;
+  --popover-border: 195 8% 18%;
+  --primary: 186 50% 70%;
+  --primary-foreground: 195 40% 8%;
+  --secondary: 195 12% 14%;
+  --secondary-foreground: 192 10% 80%;
+  --muted: 195 10% 13%;
+  --muted-foreground: 192 8% 55%;
+  --accent: 195 12% 14%;
+  --accent-foreground: 192 10% 80%;
+  --destructive: 0 50% 55%;
   --destructive-foreground: 0 0% 98%;
-  --input: 0 0% 30%;
-  --ring: 221 83% 53%;
-  --chart-1: 221 83% 65%;
-  --chart-2: 262 83% 68%;
-  --chart-3: 173 58% 55%;
-  --chart-4: 43 74% 65%;
-  --chart-5: 27 87% 65%;
+  --input: 195 8% 18%;
+  --ring: 186 50% 60%;
+  --chart-1: 186 50% 70%;
+  --chart-2: 250 40% 65%;
+  --chart-3: 140 45% 55%;
+  --chart-4: 40 70% 60%;
+  --chart-5: 0 55% 60%;
   --shadow-2xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-xs: 0px 2px 0px 0px hsl(0 0% 0% / 0.00);
   --shadow-sm: 0px 2px 0px 0px hsl(0 0% 0% / 0.00), 0px 1px 2px -1px hsl(0 0% 0% / 0.00);
@@ -170,30 +174,22 @@
     @apply border-border;
   }
 
+  html {
+    font-family: 'General Sans', sans-serif;
+  }
+
   body {
     @apply font-sans antialiased bg-background text-foreground;
+    font-family: 'General Sans', sans-serif;
+  }
+
+  .font-display {
+    font-family: 'Cabinet Grotesk', sans-serif;
   }
 }
 
 /**
  * Using the elevate system.
- * Automatic contrast adjustment.
- *
- * <element className="hover-elevate" />
- * <element className="active-elevate-2" />
- *
- * // Using the tailwind utility when a data attribute is "on"
- * <element className="toggle-elevate data-[state=on]:toggle-elevated" />
- * // Or manually controlling the toggle state
- * <element className="toggle-elevate toggle-elevated" />
- *
- * Elevation systems have to handle many states.
- * - not-hovered, vs. hovered vs. active  (three mutually exclusive states)
- * - toggled or not
- * - focused or not (this is not handled with these utilities)
- *
- * Even without handling focused or not, this is six possible combinations that
- * need to be distinguished from eachother visually.
  */
 @layer utilities {
 
@@ -209,42 +205,28 @@
     pointer-events: none;
   }
 
-  /* .no-default-hover-elevate/no-default-active-elevate is an escape hatch so consumers of
-   * buttons/badges can remove the automatic brightness adjustment on interactions
-   * and program their own. */
   .no-default-hover-elevate {}
 
   .no-default-active-elevate {}
 
-
-  /**
-   * Toggleable backgrounds go behind the content. Hoverable/active goes on top.
-   * This way they can stack/compound. Both will overlap the parent's borders!
-   * So borders will be automatically adjusted both on toggle, and hover/active,
-   * and they will be compounded.
-   */
   .toggle-elevate::before,
   .toggle-elevate-2::before {
     content: "";
     pointer-events: none;
     position: absolute;
     inset: 0px;
-    /*border-radius: inherit;   match rounded corners */
     border-radius: inherit;
     z-index: -1;
-    /* sits behind content but above backdrop */
   }
 
   .toggle-elevate.toggle-elevated::before {
     background-color: var(--elevate-2);
   }
 
-  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
   .border.toggle-elevate::before {
     inset: -1px;
   }
 
-  /* Does not work on elements with overflow:hidden! */
   .hover-elevate:not(.no-default-hover-elevate),
   .active-elevate:not(.no-default-active-elevate),
   .hover-elevate-2:not(.no-default-hover-elevate),
@@ -261,10 +243,8 @@
     pointer-events: none;
     position: absolute;
     inset: 0px;
-    /*border-radius: inherit;   match rounded corners */
     border-radius: inherit;
     z-index: 999;
-    /* sits in front of content */
   }
 
   .hover-elevate:hover:not(.no-default-hover-elevate)::after,
@@ -277,12 +257,35 @@
     background-color: var(--elevate-2);
   }
 
-  /* If there's a 1px border, adjust the inset so that it covers that parent's border */
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after,
   .border.active-elevate:not(.no-active-interaction-elevate)::after,
   .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
   .border.active-elevate-2:not(.no-active-interaction-elevate)::after,
   .border.hover-elevate:not(.no-hover-interaction-elevate)::after {
     inset: -1px;
+  }
+
+  /* Tab bar safe area */
+  .pb-safe {
+    padding-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Monospace timer font */
+  .font-mono-time {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum";
+  }
+
+  /* Scale on press */
+  .press-scale {
+    transition: transform 0.1s ease;
+  }
+  .press-scale:active {
+    transform: scale(0.96);
+  }
+
+  /* Teal glow for primary elements */
+  .glow-primary {
+    box-shadow: 0 0 20px hsl(186 50% 70% / 0.15);
   }
 }
