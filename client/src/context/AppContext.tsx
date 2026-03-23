@@ -49,6 +49,7 @@ function getWsUrl() {
 
 // Persist / restore user from localStorage
 const STORAGE_KEY = "fitsync_user";
+const WORKOUT_STORAGE_KEY = "fitsync_active_workout";
 
 function saveUserToStorage(user: User | null) {
   if (user) {
@@ -66,9 +67,31 @@ function loadUserFromStorage(): User | null {
   return null;
 }
 
+function saveWorkoutToStorage(workout: ActiveWorkout | null) {
+  if (workout) {
+    localStorage.setItem(WORKOUT_STORAGE_KEY, JSON.stringify(workout));
+  } else {
+    localStorage.removeItem(WORKOUT_STORAGE_KEY);
+  }
+}
+
+function loadWorkoutFromStorage(): ActiveWorkout | null {
+  try {
+    const raw = localStorage.getItem(WORKOUT_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return null;
+}
+
 export function AppProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUserRaw] = useState<User | null>(loadUserFromStorage());
-  const [activeWorkout, setActiveWorkout] = useState<ActiveWorkout | null>(null);
+  const [activeWorkout, setActiveWorkoutRaw] = useState<ActiveWorkout | null>(loadWorkoutFromStorage());
+
+  // Wrapped setter that also persists workout to localStorage
+  const setActiveWorkout = useCallback((workout: ActiveWorkout | null) => {
+    setActiveWorkoutRaw(workout);
+    saveWorkoutToStorage(workout);
+  }, []);
   const [isDark, setIsDark] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
   const [pendingInvite, setPendingInvite] = useState<PendingInvite | null>(null);
@@ -86,7 +109,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     setCurrentUserRaw(null);
     saveUserToStorage(null);
-    setActiveWorkout(null);
+    setActiveWorkoutRaw(null);
+    saveWorkoutToStorage(null);
   }, []);
 
   // On mount, if we have a cached user, re-fetch from server to confirm they still exist

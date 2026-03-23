@@ -25,8 +25,15 @@ if (typeof document !== "undefined") {
 const MAIN_TABS = ["/dashboard", "/history", "/friends", "/profile"];
 
 function AppRouter() {
-  const { currentUser, authLoading } = useApp();
-  const [location] = useLocation();
+  const { currentUser, activeWorkout, authLoading } = useApp();
+  const [location, navigate] = useLocation();
+
+  // If there's a persisted active workout and user lands elsewhere, redirect back
+  useEffect(() => {
+    if (!authLoading && currentUser && activeWorkout && location !== "/workout/active") {
+      navigate("/workout/active");
+    }
+  }, [authLoading, currentUser, activeWorkout, location, navigate]);
 
   // While validating the stored session, show nothing to prevent flash
   if (authLoading) {

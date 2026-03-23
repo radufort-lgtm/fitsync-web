@@ -111,6 +111,8 @@ export default function WorkoutActive() {
   const wsRef = useRef<WebSocket | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const wsConnectedOnce = useRef(false);
+  const wakeLockRef = useRef<any>(null);
+  const localTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Refs for stable reads
   const stateRef = useRef({
@@ -387,11 +389,78 @@ export default function WorkoutActive() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [phase, activeWorkout?.creatorUsername, activeWorkout?.isShared, currentUser?.username, sendStateUpdate]);
 
+  // Wake Lock — keep screen on during active workout phases
+  useEffect(() => {
+    const shouldLock = phase === "active" || phase === "transition" || phase === "rest" || phase === "weighIn";
+    if (!shouldLock) {
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+      return;
+    }
+    let cancelled = false;
+    const requestLock = async () => {
+      try {
+        if ('wakeLock' in navigator) {
+          const lock = await (navigator as any).wakeLock.request('screen');
+          if (cancelled) { lock.release(); return; }
+          wakeLockRef.current = lock;
+          // Re-acquire on visibility change (iOS releases lock when tab is backgrounded)
+          lock.addEventListener('release', () => { wakeLockRef.current = null; });
+        }
+      } catch { /* wake lock not supported or denied */ }
+    };
+    requestLock();
+    // Re-acquire when page becomes visible again
+    const onVisChange = () => {
+      if (document.visibilityState === 'visible' && !wakeLockRef.current && !cancelled) {
+        requestLock();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => {
+      cancelled = true;
+      document.removeEventListener('visibilitychange', onVisChange);
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+    };
+  }, [phase]);
+
+  // Local countdown timer for NON-CREATORS — ticks every 1s between heartbeat syncs
+  useEffect(() => {
+    const isCreatorNow = activeWorkout?.creatorUsername === currentUser?.username;
+    if (!activeWorkout?.isShared || isCreatorNow) {
+      if (localTimerRef.current) { clearInterval(localTimerRef.current); localTimerRef.current = null; }
+      return;
+    }
+    // Only tick during timed phases
+    if (phase === "active" || phase === "transition" || phase === "rest") {
+      localTimerRef.current = setInterval(() => {
+        if (phase === "active") {
+          setSetSecsLeft(prev => Math.max(0, prev - 1));
+          setElapsedSecs(s => s + 1);
+        } else if (phase === "transition") {
+          setTransitionSecsLeft(prev => Math.max(0, prev - 1));
+        } else if (phase === "rest") {
+          setRestSecsLeft(prev => Math.max(0, prev - 1));
+        }
+      }, 1000);
+    } else {
+      if (localTimerRef.current) { clearInterval(localTimerRef.current); localTimerRef.current = null; }
+    }
+    return () => { if (localTimerRef.current) { clearInterval(localTimerRef.current); localTimerRef.current = null; } };
+  }, [phase, activeWorkout?.isShared, activeWorkout?.creatorUsername, currentUser?.username]);
+
   // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+      if (localTimerRef.current) clearInterval(localTimerRef.current);
+      if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; }
     };
   }, []);
 
