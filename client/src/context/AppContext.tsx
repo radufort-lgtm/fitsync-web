@@ -13,6 +13,8 @@ interface ActiveWorkout {
   participantUsernames: string[];
   restBetweenSets: number;
   aiReasoning: string;
+  breakDuration?: number;
+  rotationCount?: number;
 }
 
 interface PendingInvite {

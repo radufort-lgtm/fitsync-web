@@ -10,7 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   ChevronLeft, ChevronRight, Users, Dumbbell, Zap, Settings,
   ClipboardList, Plus, Minus, RefreshCw, X, Check, Loader2,
-  Brain, Clock, Flame, Target, Search, ListChecks
+  Brain, Clock, Flame, Target, Search, ListChecks, Repeat
 } from "lucide-react";
 import type { PlannedExercise, User, Exercise } from "@shared/schema";
 
@@ -27,7 +27,8 @@ const EQUIPMENT = [
 const GOALS = ["Strength", "Muscle Gain", "Fat Loss", "Performance", "General Fitness"];
 const DURATIONS = [30, 45, 60, 90];
 const INTENSITIES = ["Light", "Moderate", "Intense", "Extreme"];
-const REST_OPTIONS = [60, 90, 120, 180];
+const BREAK_OPTIONS = [30, 60, 90, 120, 180];
+const ROTATION_OPTIONS = [1, 2, 3, 4, 5];
 
 const intensityColors: Record<string, string> = {
   Light: "text-chart-3 border-chart-3/40 bg-chart-3/10",
@@ -51,7 +52,8 @@ interface WorkoutConfig {
   goal: string;
   duration: number;
   intensity: string;
-  restBetweenSets: number;
+  breakDuration: number;
+  rotationCount: number;
 }
 
 interface GeneratedPlan {
@@ -70,7 +72,8 @@ export default function WorkoutNew() {
     goal: "Muscle Gain",
     duration: 45,
     intensity: "Moderate",
-    restBetweenSets: 90,
+    breakDuration: 60,
+    rotationCount: 1,
   });
   const [newParticipant, setNewParticipant] = useState("");
   const [generatedPlan, setGeneratedPlan] = useState<GeneratedPlan | null>(null);
@@ -137,7 +140,7 @@ export default function WorkoutNew() {
         goal: config.goal,
         duration: config.duration,
         intensity: config.intensity,
-        restBetweenSets: config.restBetweenSets,
+        restBetweenSets: config.breakDuration,
         participantUsernames: config.participants,
       });
       setGeneratedPlan(result);
@@ -152,25 +155,16 @@ export default function WorkoutNew() {
     return generatedPlan?.exercises.some(e => e.exerciseId === exerciseId) ?? false;
   };
 
-  const goalParams: Record<string, { sets: number; reps: number }> = {
-    "Strength": { sets: 4, reps: 5 },
-    "Muscle Gain": { sets: 3, reps: 10 },
-    "Fat Loss": { sets: 3, reps: 13 },
-    "Performance": { sets: 3, reps: 8 },
-    "General Fitness": { sets: 3, reps: 10 },
-  };
-
   const addExerciseToPlan = (exercise: Exercise) => {
     if (!generatedPlan) return;
-    const { sets, reps } = goalParams[config.goal] || { sets: 3, reps: 10 };
     const newEx: PlannedExercise = {
       exerciseId: exercise.id,
       exerciseName: exercise.name,
       primaryMuscle: exercise.primaryMuscle,
-      sets,
-      reps,
+      sets: 1,
+      reps: 0, // not used in rotation mode
       weight: 0,
-      restSeconds: config.restBetweenSets,
+      restSeconds: config.breakDuration,
     };
     setGeneratedPlan({
       ...generatedPlan,
@@ -218,7 +212,7 @@ export default function WorkoutNew() {
         goal: config.goal,
         estimatedDuration: config.duration,
         intensity: config.intensity,
-        restBetweenSets: config.restBetweenSets,
+        restBetweenSets: config.breakDuration,
         aiReasoning: generatedPlan.aiReasoning,
       });
 
@@ -258,8 +252,10 @@ export default function WorkoutNew() {
         creatorUsername: currentUser.username,
         isShared: config.participants.length > 0,
         participantUsernames: [currentUser.username, ...config.participants],
-        restBetweenSets: config.restBetweenSets,
+        restBetweenSets: config.breakDuration,
         aiReasoning: generatedPlan.aiReasoning,
+        breakDuration: config.breakDuration,
+        rotationCount: config.rotationCount,
       });
 
       navigate("/workout/active");
@@ -612,22 +608,44 @@ export default function WorkoutNew() {
                     </div>
                   </div>
 
-                  {/* Rest */}
+                  {/* Break Duration */}
                   <div>
                     <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
-                      <Target className="w-3 h-3" /> Rest between sets
+                      <Target className="w-3 h-3" /> Break between stations
                     </label>
                     <div className="flex gap-2">
-                      {REST_OPTIONS.map(r => (
+                      {BREAK_OPTIONS.map(r => (
                         <button
                           key={r}
-                          data-testid={`rest-${r}`}
-                          onClick={() => setConfig(c => ({ ...c, restBetweenSets: r }))}
+                          data-testid={`break-${r}`}
+                          onClick={() => setConfig(c => ({ ...c, breakDuration: r }))}
                           className={`flex-1 py-2 rounded-xl border text-xs font-bold transition-all press-scale ${
-                            config.restBetweenSets === r ? "border-primary bg-primary/15 text-primary" : "border-border bg-card text-muted-foreground hover:border-primary/40"
+                            config.breakDuration === r ? "border-primary bg-primary/15 text-primary" : "border-border bg-card text-muted-foreground hover:border-primary/40"
                           }`}
                         >
                           {r}s
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Rotation Count */}
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
+                      <Repeat className="w-3 h-3" /> Full rotations
+                    </label>
+                    <p className="text-xs text-muted-foreground mb-2">How many times everyone does all stations</p>
+                    <div className="flex gap-2">
+                      {ROTATION_OPTIONS.map(r => (
+                        <button
+                          key={r}
+                          data-testid={`rotation-${r}`}
+                          onClick={() => setConfig(c => ({ ...c, rotationCount: r }))}
+                          className={`flex-1 py-2.5 rounded-xl border text-sm font-bold transition-all press-scale ${
+                            config.rotationCount === r ? "border-primary bg-primary/15 text-primary" : "border-border bg-card text-muted-foreground hover:border-primary/40"
+                          }`}
+                        >
+                          {r}x
                         </button>
                       ))}
                     </div>
@@ -640,10 +658,10 @@ export default function WorkoutNew() {
             {actual === 5 && (
               <div>
                 <div className="mb-4">
-                  <h2 className="text-xl font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>Pick Exercises</h2>
+                  <h2 className="text-xl font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>Pick Stations</h2>
                   <p className="text-muted-foreground text-sm">
                     {generating ? "Generating your workout..." :
-                     generatedPlan ? `${generatedPlan.exercises.length} selected — tap to add or remove.` :
+                     generatedPlan ? `${generatedPlan.exercises.length} stations — each station = 3 min of work.` :
                      "Loading..."}
                   </p>
                 </div>
@@ -675,7 +693,7 @@ export default function WorkoutNew() {
                       <div className="bg-primary/5 border border-primary/20 rounded-xl p-3">
                         <div className="flex items-center gap-2 mb-2">
                           <ListChecks className="w-4 h-4 text-primary" />
-                          <span className="text-xs font-semibold text-primary uppercase tracking-wide">Your Workout ({generatedPlan.exercises.length})</span>
+                          <span className="text-xs font-semibold text-primary uppercase tracking-wide">Stations ({generatedPlan.exercises.length})</span>
                         </div>
                         <div className="flex flex-wrap gap-1.5">
                           {generatedPlan.exercises.map((ex, i) => (
@@ -778,9 +796,21 @@ export default function WorkoutNew() {
                       <div className="flex flex-wrap gap-2 text-xs">
                         <span className="flex items-center gap-1 text-muted-foreground"><Clock className="w-3 h-3" />{config.duration} min</span>
                         <span className="flex items-center gap-1 text-muted-foreground"><Flame className="w-3 h-3" />{config.intensity}</span>
-                        <span className="flex items-center gap-1 text-muted-foreground"><Dumbbell className="w-3 h-3" />{generatedPlan.exercises.length} exercises</span>
+                        <span className="flex items-center gap-1 text-muted-foreground"><Dumbbell className="w-3 h-3" />{generatedPlan.exercises.length} stations</span>
                         <span className="flex items-center gap-1 text-muted-foreground"><Target className="w-3 h-3" />{config.goal}</span>
+                        <span className="flex items-center gap-1 text-muted-foreground"><Repeat className="w-3 h-3" />{config.rotationCount}x rotation</span>
                       </div>
+                    </div>
+
+                    {/* Rotation info */}
+                    <div className="bg-card border border-border rounded-xl p-3">
+                      <div className="flex items-center gap-2 mb-1">
+                        <Repeat className="w-4 h-4 text-primary" />
+                        <span className="text-xs font-semibold text-primary uppercase tracking-wide">Rotation Format</span>
+                      </div>
+                      <p className="text-sm text-muted-foreground leading-relaxed">
+                        3 min per station · {config.breakDuration}s break · {config.rotationCount} full rotation{config.rotationCount > 1 ? "s" : ""} · Everyone starts at a different station
+                      </p>
                     </div>
 
                     {/* AI Reasoning */}
@@ -795,7 +825,7 @@ export default function WorkoutNew() {
                     {/* Exercise list */}
                     <div>
                       <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm font-semibold">Exercises</span>
+                        <span className="text-sm font-semibold">Stations</span>
                       </div>
                       <div className="space-y-2">
                         {generatedPlan.exercises.map((ex, i) => (
@@ -811,36 +841,14 @@ export default function WorkoutNew() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="font-medium text-sm truncate">{ex.exerciseName}</div>
-                              <div className="text-xs text-muted-foreground">{ex.primaryMuscle}</div>
+                              <div className="text-xs text-muted-foreground">{ex.primaryMuscle} · 3 min</div>
                             </div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                              <button
-                                data-testid={`minus-sets-${i}`}
-                                onClick={() => {
-                                  const updated = [...generatedPlan.exercises];
-                                  updated[i] = { ...updated[i], sets: Math.max(1, updated[i].sets - 1) };
-                                  setGeneratedPlan({ ...generatedPlan, exercises: updated });
-                                }}
-                                className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center"
-                              >
-                                <Minus className="w-3 h-3" />
-                              </button>
-                              <div className="text-center min-w-[40px]">
-                                <div className="text-xs font-bold">{ex.sets}×{ex.reps}</div>
-                                <div className="text-[9px] text-muted-foreground">sets×reps</div>
-                              </div>
-                              <button
-                                data-testid={`plus-sets-${i}`}
-                                onClick={() => {
-                                  const updated = [...generatedPlan.exercises];
-                                  updated[i] = { ...updated[i], sets: Math.min(8, updated[i].sets + 1) };
-                                  setGeneratedPlan({ ...generatedPlan, exercises: updated });
-                                }}
-                                className="w-6 h-6 rounded-full bg-secondary flex items-center justify-center"
-                              >
-                                <Plus className="w-3 h-3" />
-                              </button>
-                            </div>
+                            <button
+                              onClick={() => removeExerciseFromPlan(ex.exerciseId)}
+                              className="w-6 h-6 rounded-full bg-destructive/10 flex items-center justify-center hover:bg-destructive/20 transition-colors"
+                            >
+                              <X className="w-3 h-3 text-destructive" />
+                            </button>
                           </motion.div>
                         ))}
                       </div>

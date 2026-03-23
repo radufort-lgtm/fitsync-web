@@ -89,11 +89,21 @@ export function setupWebSocket(httpServer: Server) {
 
         // State update from creator → broadcast to all participants
         if (msg.type === "state-update" && client) {
-          broadcast(client.sessionId, {
-            type: "state-sync",
-            serverTimestamp: Date.now(),
-            payload: msg.payload,
-          }, client.ws); // exclude sender
+          // Check if payload is a weight-update from any user
+          if (msg.payload?.type === "weight-update") {
+            broadcast(client.sessionId, {
+              type: "weight-update",
+              username: msg.payload.username,
+              stationIdx: msg.payload.stationIdx,
+              weight: msg.payload.weight,
+            }, client.ws); // exclude sender
+          } else {
+            broadcast(client.sessionId, {
+              type: "state-sync",
+              serverTimestamp: Date.now(),
+              payload: msg.payload,
+            }, client.ws); // exclude sender
+          }
         }
       } catch (e) {
         // Ignore malformed messages
