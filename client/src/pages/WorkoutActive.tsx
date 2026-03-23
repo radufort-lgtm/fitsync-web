@@ -65,17 +65,43 @@ export default function WorkoutActive() {
   stateRef.current = { phase, exerciseIndex, currentSetIndex, restSecs, totalVolume, elapsedSecs };
 
   // Track if we've ever had an active workout to avoid premature redirect
-  const hadWorkoutRef = useRef(!!activeWorkout);
+  const hadWorkoutRef = useRef(false);
   if (activeWorkout) hadWorkoutRef.current = true;
 
-  // Redirect if no active workout — only after we've confirmed there never was one
+  // Redirect if no active workout — but give React time to propagate state first.
+  // On first mount, activeWorkout might not be set yet (state update from WorkoutNew
+  // may not have committed). So we delay the redirect check.
+  const redirectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!activeWorkout && !hadWorkoutRef.current) {
-      navigate("/dashboard");
+    // Clear any pending redirect when activeWorkout becomes available
+    if (activeWorkout) {
+      if (redirectTimerRef.current) {
+        clearTimeout(redirectTimerRef.current);
+        redirectTimerRef.current = null;
+      }
+      return;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!activeWorkout || !currentUser) return null;
+    // Only redirect if we never had an active workout AND it's been long enough
+    // for state to settle
+    if (!hadWorkoutRef.current) {
+      redirectTimerRef.current = setTimeout(() => {
+        // Re-check — activeWorkout may have arrived during the timeout
+        if (!hadWorkoutRef.current) {
+          navigate("/dashboard");
+        }
+      }, 500);
+    }
+
+    return () => {
+      if (redirectTimerRef.current) clearTimeout(redirectTimerRef.current);
+    };
+  }, [activeWorkout]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!activeWorkout || !currentUser) {
+    // Show nothing while waiting for state to arrive — don't flash or redirect yet
+    return null;
+  }
 
   const exercises: PlannedExercise[] = activeWorkout.exercises;
   const currentExercise = exercises[exerciseIndex];
