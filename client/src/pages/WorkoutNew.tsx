@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useLocation } from "wouter";
 import { useApp } from "@/context/AppContext";
 import { apiRequest } from "@/lib/queryClient";
+import { localCache } from "@/lib/localCache";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -88,7 +89,11 @@ export default function WorkoutNew() {
 
   const { data: friends = [] } = useQuery<User[]>({
     queryKey: ["/api/users", currentUser?.id, "friends"],
-    queryFn: () => apiRequest("GET", `/api/users/${currentUser?.id}/friends`),
+    queryFn: async () => {
+      const data = await apiRequest("GET", `/api/users/${currentUser?.id}/friends`);
+      localCache.saveFriends(data);
+      return data;
+    },
     enabled: !!currentUser?.id,
   });
 
@@ -215,6 +220,11 @@ export default function WorkoutNew() {
         restBetweenSets: config.breakDuration,
         aiReasoning: generatedPlan.aiReasoning,
       });
+
+      // Cache workout plan locally
+      const cachedPlans = localCache.getWorkoutPlans();
+      cachedPlans.push(plan);
+      localCache.saveWorkoutPlans(cachedPlans);
 
       // Create session
       const session = await apiRequest("POST", "/api/workout-sessions", {

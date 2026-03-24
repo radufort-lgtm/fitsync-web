@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { useApp } from "@/context/AppContext";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { localCache } from "@/lib/localCache";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -32,7 +33,11 @@ export default function Profile() {
 
   const { data: history = [], isLoading: histLoading } = useQuery<WorkoutHistory[]>({
     queryKey: ["/api/users", currentUser?.id, "workout-history"],
-    queryFn: () => apiRequest("GET", `/api/users/${currentUser?.id}/workout-history`),
+    queryFn: async () => {
+      const data = await apiRequest("GET", `/api/users/${currentUser?.id}/workout-history`);
+      localCache.saveWorkoutHistory(data);
+      return data;
+    },
     enabled: !!currentUser?.id,
   });
 

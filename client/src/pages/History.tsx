@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { useApp } from "@/context/AppContext";
 import { apiRequest } from "@/lib/queryClient";
+import { localCache } from "@/lib/localCache";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Dumbbell, Clock, TrendingUp, ChevronDown, ChevronUp, Users, Brain } from "lucide-react";
 import type { WorkoutHistory } from "@shared/schema";
@@ -16,7 +17,11 @@ export default function History() {
 
   const { data: history = [], isLoading } = useQuery<WorkoutHistory[]>({
     queryKey: ["/api/users", currentUser?.id, "workout-history"],
-    queryFn: () => apiRequest("GET", `/api/users/${currentUser?.id}/workout-history`),
+    queryFn: async () => {
+      const data = await apiRequest("GET", `/api/users/${currentUser?.id}/workout-history`);
+      localCache.saveWorkoutHistory(data);
+      return data;
+    },
     enabled: !!currentUser?.id,
   });
 

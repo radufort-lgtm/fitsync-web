@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
 import { useApp } from "@/context/AppContext";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { localCache } from "@/lib/localCache";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -19,7 +20,11 @@ export default function Friends() {
   // Accepted friends
   const { data: friends = [], isLoading: friendsLoading } = useQuery<User[]>({
     queryKey: ["/api/users", currentUser?.id, "friends"],
-    queryFn: () => apiRequest("GET", `/api/users/${currentUser?.id}/friends`),
+    queryFn: async () => {
+      const data = await apiRequest("GET", `/api/users/${currentUser?.id}/friends`);
+      localCache.saveFriends(data);
+      return data;
+    },
     enabled: !!currentUser?.id,
   });
 

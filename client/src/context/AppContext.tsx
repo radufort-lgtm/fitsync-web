@@ -2,6 +2,7 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback, ty
 import type { User, Notification as AppNotification } from "@shared/schema";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { localCache } from "@/lib/localCache";
 
 interface ActiveWorkout {
   sessionId: number;
@@ -111,9 +112,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveUserToStorage(null);
     setActiveWorkoutRaw(null);
     saveWorkoutToStorage(null);
+    localCache.clearAll();
   }, []);
 
-  // On mount, if we have a cached user, validate or re-create on server
+  // On mount, if we have a cached user, validate or bulk-restore on server
   useEffect(() => {
     const cached = loadUserFromStorage();
     if (!cached) { setAuthLoading(false); return; }
@@ -124,22 +126,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
         saveUserToStorage(freshUser);
       })
       .catch(async () => {
-        // Server lost data (restart). Re-create the account from local cache.
+        // Server lost data (restart). Bulk restore everything from local cache.
         try {
-          const restored: User = await apiRequest("POST", "/api/users", {
-            username: cached.username,
-            displayName: cached.displayName,
-            phone: cached.phone || "",
-            heightCm: cached.heightCm,
-            weightKg: cached.weightKg,
-            goals: cached.goals,
-          });
+          const payload = localCache.getRestorePayload(cached);
+          const restored: User = await apiRequest("POST", "/api/restore", payload);
           setCurrentUserRaw(restored);
           saveUserToStorage(restored);
         } catch {
-          // If re-create also fails (e.g. username taken by someone else), clear
+          // If restore fails completely, clear
           setCurrentUserRaw(null);
           saveUserToStorage(null);
+          localCache.clearAll();
         }
       })
       .finally(() => setAuthLoading(false));

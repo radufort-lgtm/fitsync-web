@@ -3,6 +3,7 @@ import { motion } from "framer-motion";
 import { Link, useLocation } from "wouter";
 import { useApp } from "@/context/AppContext";
 import { apiRequest } from "@/lib/queryClient";
+import { localCache } from "@/lib/localCache";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import FitSyncLogo from "@/components/FitSyncLogo";
@@ -122,7 +123,11 @@ export default function Dashboard() {
 
   const { data: historyData, isLoading: historyLoading } = useQuery<WorkoutHistory[]>({
     queryKey: ["/api/users", currentUser?.id, "workout-history"],
-    queryFn: () => apiRequest("GET", `/api/users/${currentUser?.id}/workout-history`),
+    queryFn: async () => {
+      const data = await apiRequest("GET", `/api/users/${currentUser?.id}/workout-history`);
+      localCache.saveWorkoutHistory(data);
+      return data;
+    },
     enabled: !!currentUser?.id,
   });
 

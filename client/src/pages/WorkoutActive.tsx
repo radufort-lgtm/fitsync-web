@@ -4,6 +4,7 @@ import { useLocation } from "wouter";
 import { useApp } from "@/context/AppContext";
 import { apiRequest } from "@/lib/queryClient";
 import { queryClient } from "@/lib/queryClient";
+import { localCache } from "@/lib/localCache";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -579,7 +580,7 @@ export default function WorkoutActive() {
         completedAt: new Date().toISOString(),
       });
       const muscles = Array.from(new Set(exercises.map(e => e.primaryMuscle)));
-      await apiRequest("POST", "/api/workout-history", {
+      const historyEntry = await apiRequest("POST", "/api/workout-history", {
         userId: currentUser.id,
         planId: activeWorkout.planId,
         planName: activeWorkout.planName,
@@ -591,6 +592,10 @@ export default function WorkoutActive() {
         participantCount: activeWorkout.participantUsernames.length,
         aiReasoning: activeWorkout.aiReasoning,
       });
+      // Cache locally
+      const cached = localCache.getWorkoutHistory();
+      cached.push(historyEntry);
+      localCache.saveWorkoutHistory(cached);
       queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser.id, "workout-history"] });
       queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser.id, "workout-history-recent"] });
     } catch (e) {

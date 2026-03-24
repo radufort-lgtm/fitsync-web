@@ -159,6 +159,99 @@ export async function registerRoutes(
     }
   });
 
+  // ── Bulk Restore (re-create user + all data after server restart) ─────────
+  app.post("/api/restore", async (req, res) => {
+    try {
+      const { user: userData, friends, workoutHistory, workoutPlans } = req.body;
+      if (!userData?.username) return res.status(400).json({ error: "Missing user data" });
+
+      // 1. Re-create or find the user
+      let user = await storage.getUserByUsername(userData.username);
+      if (!user) {
+        user = await storage.createUser({
+          username: userData.username,
+          displayName: userData.displayName,
+          phone: userData.phone || "",
+          heightCm: userData.heightCm,
+          weightKg: userData.weightKg,
+          goals: userData.goals,
+        });
+      }
+
+      // 2. Re-create friends: ensure each friend user exists, then create accepted friend request
+      if (Array.isArray(friends)) {
+        for (const f of friends) {
+          if (!f.username) continue;
+          let friendUser = await storage.getUserByUsername(f.username);
+          if (!friendUser) {
+            friendUser = await storage.createUser({
+              username: f.username,
+              displayName: f.displayName || f.username,
+              phone: f.phone || "",
+              heightCm: f.heightCm,
+              weightKg: f.weightKg,
+              goals: f.goals || "[]",
+            });
+          }
+          // Only create friendship if it doesn't already exist
+          const existing = await storage.findExistingFriendRequest(user.id, friendUser.id);
+          if (!existing) {
+            const req = await storage.createFriendRequest(user.id, friendUser.id);
+            await storage.updateFriendRequest(req.id, "accepted");
+          }
+        }
+      }
+
+      // 3. Re-create workout history
+      if (Array.isArray(workoutHistory)) {
+        // Check what already exists to avoid duplicates
+        const existingHistory = await storage.getWorkoutHistory(user.id);
+        const existingKeys = new Set(existingHistory.map(h => `${h.planName}|${h.completedAt}`));
+        for (const h of workoutHistory) {
+          const key = `${h.planName}|${h.completedAt}`;
+          if (existingKeys.has(key)) continue;
+          await storage.createWorkoutHistory({
+            userId: user.id,
+            planId: h.planId || 0,
+            planName: h.planName || "",
+            totalVolume: h.totalVolume || 0,
+            duration: h.duration || 0,
+            musclesWorked: h.musclesWorked || "[]",
+            exerciseLogs: h.exerciseLogs || "[]",
+            wasShared: h.wasShared || false,
+            participantCount: h.participantCount || 1,
+            aiReasoning: h.aiReasoning || "",
+          });
+        }
+      }
+
+      // 4. Re-create workout plans
+      if (Array.isArray(workoutPlans)) {
+        const existingPlans = await storage.getWorkoutPlansByUser(user.id);
+        const existingNames = new Set(existingPlans.map(p => p.name));
+        for (const p of workoutPlans) {
+          if (existingNames.has(p.name)) continue;
+          await storage.createWorkoutPlan({
+            name: p.name,
+            userId: user.id,
+            exercises: p.exercises || "[]",
+            workoutTypes: p.workoutTypes || "[]",
+            goal: p.goal || "Muscle Gain",
+            estimatedDuration: p.estimatedDuration || 45,
+            intensity: p.intensity || "Moderate",
+            restBetweenSets: p.restBetweenSets || 90,
+            aiReasoning: p.aiReasoning || "",
+          });
+        }
+      }
+
+      return res.json(user);
+    } catch (e: any) {
+      console.error("[restore] Error:", e);
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Users ──────────────────────────────────────────────────────────────────
   app.post("/api/users", async (req, res) => {
     try {
