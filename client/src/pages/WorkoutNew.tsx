@@ -26,7 +26,7 @@ const EQUIPMENT = [
 ];
 
 const GOALS = ["Strength", "Muscle Gain", "Fat Loss", "Performance", "General Fitness"];
-const DURATIONS = [30, 45, 60, 90];
+const DURATIONS = [5, 10, 15, 20, 25, 30, 45, 50, 55, 60];
 const INTENSITIES = ["Light", "Moderate", "Intense", "Extreme"];
 const BREAK_OPTIONS = [30, 60, 90, 120, 180];
 const ROTATION_OPTIONS = [1, 2, 3, 4, 5];
@@ -579,19 +579,30 @@ export default function WorkoutNew() {
                     <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1">
                       <Clock className="w-3 h-3" /> Duration (minutes)
                     </label>
-                    <div className="flex gap-2">
-                      {DURATIONS.map(d => (
-                        <button
-                          key={d}
-                          data-testid={`duration-${d}`}
-                          onClick={() => setConfig(c => ({ ...c, duration: d }))}
-                          className={`flex-1 py-2.5 rounded-xl border text-sm font-bold transition-all press-scale ${
-                            config.duration === d ? "border-primary bg-primary/15 text-primary" : "border-border bg-card text-muted-foreground hover:border-primary/40"
-                          }`}
-                        >
-                          {d}
-                        </button>
-                      ))}
+                    <div className="flex items-center justify-center gap-4">
+                      <button
+                        onClick={() => setConfig(c => {
+                          const idx = DURATIONS.indexOf(c.duration);
+                          return { ...c, duration: DURATIONS[Math.max(0, idx - 1)] };
+                        })}
+                        disabled={config.duration === DURATIONS[0]}
+                        className="w-11 h-11 rounded-full border border-border bg-card flex items-center justify-center text-lg font-bold text-muted-foreground hover:border-primary/40 disabled:opacity-30 transition-all press-scale"
+                      >
+                        <Minus className="w-5 h-5" />
+                      </button>
+                      <span className="text-3xl font-bold text-primary w-20 text-center tabular-nums">
+                        {config.duration === 60 ? "1 hr" : config.duration}
+                      </span>
+                      <button
+                        onClick={() => setConfig(c => {
+                          const idx = DURATIONS.indexOf(c.duration);
+                          return { ...c, duration: DURATIONS[Math.min(DURATIONS.length - 1, idx + 1)] };
+                        })}
+                        disabled={config.duration === DURATIONS[DURATIONS.length - 1]}
+                        className="w-11 h-11 rounded-full border border-border bg-card flex items-center justify-center text-lg font-bold text-muted-foreground hover:border-primary/40 disabled:opacity-30 transition-all press-scale"
+                      >
+                        <Plus className="w-5 h-5" />
+                      </button>
                     </div>
                   </div>
 
