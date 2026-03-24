@@ -12,129 +12,124 @@ import {
   type ExerciseLog, type InsertExerciseLog,
   type WorkoutHistory, type InsertWorkoutHistory,
 } from "@shared/schema";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { eq, and, or, gte, desc } from "drizzle-orm";
+import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
+import { eq, and, or, gte, desc, sql } from "drizzle-orm";
 
-const sqlite = new Database("data.db");
-sqlite.pragma("journal_mode = WAL");
+const DATABASE_URL = process.env.DATABASE_URL;
+if (!DATABASE_URL) {
+  throw new Error("DATABASE_URL environment variable is required. Set it to your Neon PostgreSQL connection string.");
+}
 
-export const db = drizzle(sqlite);
+const queryClient = neon(DATABASE_URL);
+export const db = drizzle(queryClient);
 
-// ── Initialize tables ─────────────────────────────────────────────────────────
-sqlite.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    display_name TEXT NOT NULL,
-    phone TEXT NOT NULL DEFAULT '',
-    height_cm REAL,
-    weight_kg REAL,
-    goals TEXT NOT NULL DEFAULT '[]',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
+// ── Initialize tables (idempotent) ──────────────────────────────────────────
+export async function initDatabase() {
+  await queryClient(`
+    CREATE TABLE IF NOT EXISTS users (
+      id SERIAL PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      phone TEXT NOT NULL DEFAULT '',
+      height_cm REAL,
+      weight_kg REAL,
+      goals TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL DEFAULT (now()::text)
+    );
 
-  CREATE TABLE IF NOT EXISTS friend_requests (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    from_user_id INTEGER NOT NULL,
-    to_user_id INTEGER NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
+    CREATE TABLE IF NOT EXISTS friend_requests (
+      id SERIAL PRIMARY KEY,
+      from_user_id INTEGER NOT NULL,
+      to_user_id INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT (now()::text)
+    );
 
-  CREATE TABLE IF NOT EXISTS workout_invites (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id INTEGER NOT NULL,
-    from_username TEXT NOT NULL,
-    to_username TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
+    CREATE TABLE IF NOT EXISTS workout_invites (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER NOT NULL,
+      from_username TEXT NOT NULL,
+      to_username TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL DEFAULT (now()::text)
+    );
 
-  CREATE TABLE IF NOT EXISTS notifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    body TEXT NOT NULL,
-    related_id INTEGER,
-    is_read INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
+    CREATE TABLE IF NOT EXISTS notifications (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      related_id INTEGER,
+      is_read BOOLEAN NOT NULL DEFAULT false,
+      created_at TEXT NOT NULL DEFAULT (now()::text)
+    );
 
-  CREATE TABLE IF NOT EXISTS exercises (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    primary_muscle TEXT NOT NULL,
-    secondary_muscles TEXT NOT NULL DEFAULT '[]',
-    equipment TEXT NOT NULL DEFAULT '[]',
-    workout_types TEXT NOT NULL DEFAULT '[]',
-    is_compound INTEGER NOT NULL DEFAULT 0,
-    instructions TEXT NOT NULL DEFAULT ''
-  );
+    CREATE TABLE IF NOT EXISTS exercises (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      primary_muscle TEXT NOT NULL,
+      secondary_muscles TEXT NOT NULL DEFAULT '[]',
+      equipment TEXT NOT NULL DEFAULT '[]',
+      workout_types TEXT NOT NULL DEFAULT '[]',
+      is_compound BOOLEAN NOT NULL DEFAULT false,
+      instructions TEXT NOT NULL DEFAULT ''
+    );
 
-  CREATE TABLE IF NOT EXISTS workout_plans (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    user_id INTEGER NOT NULL,
-    exercises TEXT NOT NULL DEFAULT '[]',
-    workout_types TEXT NOT NULL DEFAULT '[]',
-    goal TEXT NOT NULL DEFAULT 'Muscle Gain',
-    estimated_duration INTEGER NOT NULL DEFAULT 45,
-    intensity TEXT NOT NULL DEFAULT 'Moderate',
-    rest_between_sets INTEGER NOT NULL DEFAULT 90,
-    ai_reasoning TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
+    CREATE TABLE IF NOT EXISTS workout_plans (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      exercises TEXT NOT NULL DEFAULT '[]',
+      workout_types TEXT NOT NULL DEFAULT '[]',
+      goal TEXT NOT NULL DEFAULT 'Muscle Gain',
+      estimated_duration INTEGER NOT NULL DEFAULT 45,
+      intensity TEXT NOT NULL DEFAULT 'Moderate',
+      rest_between_sets INTEGER NOT NULL DEFAULT 90,
+      ai_reasoning TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (now()::text)
+    );
 
-  CREATE TABLE IF NOT EXISTS workout_sessions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    plan_id INTEGER NOT NULL,
-    user_id INTEGER NOT NULL,
-    participant_usernames TEXT NOT NULL DEFAULT '[]',
-    creator_username TEXT NOT NULL,
-    is_shared INTEGER NOT NULL DEFAULT 0,
-    started_at TEXT,
-    completed_at TEXT,
-    status TEXT NOT NULL DEFAULT 'pending',
-    is_paused INTEGER NOT NULL DEFAULT 0,
-    current_rotation_index INTEGER NOT NULL DEFAULT 0
-  );
+    CREATE TABLE IF NOT EXISTS workout_sessions (
+      id SERIAL PRIMARY KEY,
+      plan_id INTEGER NOT NULL,
+      user_id INTEGER NOT NULL,
+      participant_usernames TEXT NOT NULL DEFAULT '[]',
+      creator_username TEXT NOT NULL,
+      is_shared BOOLEAN NOT NULL DEFAULT false,
+      started_at TEXT,
+      completed_at TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      is_paused BOOLEAN NOT NULL DEFAULT false,
+      current_rotation_index INTEGER NOT NULL DEFAULT 0
+    );
 
-  CREATE TABLE IF NOT EXISTS exercise_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id INTEGER NOT NULL,
-    exercise_id INTEGER NOT NULL,
-    exercise_name TEXT NOT NULL,
-    username TEXT NOT NULL,
-    sets TEXT NOT NULL DEFAULT '[]',
-    timestamp TEXT NOT NULL DEFAULT (datetime('now'))
-  );
+    CREATE TABLE IF NOT EXISTS exercise_logs (
+      id SERIAL PRIMARY KEY,
+      session_id INTEGER NOT NULL,
+      exercise_id INTEGER NOT NULL,
+      exercise_name TEXT NOT NULL,
+      username TEXT NOT NULL,
+      sets TEXT NOT NULL DEFAULT '[]',
+      timestamp TEXT NOT NULL DEFAULT (now()::text)
+    );
 
-  CREATE TABLE IF NOT EXISTS workout_history (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id INTEGER NOT NULL,
-    plan_id INTEGER NOT NULL,
-    plan_name TEXT NOT NULL DEFAULT '',
-    total_volume REAL NOT NULL DEFAULT 0,
-    duration INTEGER NOT NULL DEFAULT 0,
-    muscles_worked TEXT NOT NULL DEFAULT '[]',
-    exercise_logs TEXT NOT NULL DEFAULT '[]',
-    was_shared INTEGER NOT NULL DEFAULT 0,
-    participant_count INTEGER NOT NULL DEFAULT 1,
-    ai_reasoning TEXT NOT NULL DEFAULT '',
-    completed_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-
-  -- Drop old friends table if it exists
-  DROP TABLE IF EXISTS friends;
-`);
-
-// Migration: add phone column if missing
-try {
-  sqlite.exec(`ALTER TABLE users ADD COLUMN phone TEXT NOT NULL DEFAULT ''`);
-} catch {
-  // column already exists
+    CREATE TABLE IF NOT EXISTS workout_history (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER NOT NULL,
+      plan_id INTEGER NOT NULL,
+      plan_name TEXT NOT NULL DEFAULT '',
+      total_volume REAL NOT NULL DEFAULT 0,
+      duration INTEGER NOT NULL DEFAULT 0,
+      muscles_worked TEXT NOT NULL DEFAULT '[]',
+      exercise_logs TEXT NOT NULL DEFAULT '[]',
+      was_shared BOOLEAN NOT NULL DEFAULT false,
+      participant_count INTEGER NOT NULL DEFAULT 1,
+      ai_reasoning TEXT NOT NULL DEFAULT '',
+      completed_at TEXT NOT NULL DEFAULT (now()::text)
+    );
+  `);
 }
 
 export interface IStorage {
@@ -199,66 +194,70 @@ export interface IStorage {
 export class DatabaseStorage implements IStorage {
   // ── Users ──────────────────────────────────────────────────────────────────
   async getUser(id: number): Promise<User | undefined> {
-    return db.select().from(users).where(eq(users.id, id)).get();
+    const rows = await db.select().from(users).where(eq(users.id, id));
+    return rows[0];
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return db.select().from(users).where(eq(users.username, username)).get();
+    const rows = await db.select().from(users).where(eq(users.username, username));
+    return rows[0];
   }
 
   async getUserByPhone(phone: string): Promise<User | undefined> {
-    return db.select().from(users).where(eq(users.phone, phone)).get();
+    const rows = await db.select().from(users).where(eq(users.phone, phone));
+    return rows[0];
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    return db.insert(users).values(insertUser).returning().get();
+    const rows = await db.insert(users).values(insertUser).returning();
+    return rows[0];
   }
 
   async updateUser(id: number, updates: Partial<InsertUser>): Promise<User | undefined> {
-    return db.update(users).set(updates).where(eq(users.id, id)).returning().get();
+    const rows = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+    return rows[0];
   }
 
   // ── Friend Requests ────────────────────────────────────────────────────────
   async createFriendRequest(fromUserId: number, toUserId: number): Promise<FriendRequest> {
-    return db.insert(friendRequests).values({ fromUserId, toUserId, status: "pending" }).returning().get();
+    const rows = await db.insert(friendRequests).values({ fromUserId, toUserId, status: "pending" }).returning();
+    return rows[0];
   }
 
   async getPendingFriendRequests(userId: number): Promise<(FriendRequest & { fromUser?: User })[]> {
-    const requests = db.select().from(friendRequests)
+    const requests = await db.select().from(friendRequests)
       .where(and(eq(friendRequests.toUserId, userId), eq(friendRequests.status, "pending")))
-      .orderBy(desc(friendRequests.id)).all();
+      .orderBy(desc(friendRequests.id));
 
-    // Enrich with sender info
     const enriched = [];
     for (const req of requests) {
-      const fromUser = db.select().from(users).where(eq(users.id, req.fromUserId)).get();
-      enriched.push({ ...req, fromUser });
+      const fromRows = await db.select().from(users).where(eq(users.id, req.fromUserId));
+      enriched.push({ ...req, fromUser: fromRows[0] });
     }
     return enriched;
   }
 
   async getSentFriendRequests(userId: number): Promise<(FriendRequest & { toUser?: User })[]> {
-    const requests = db.select().from(friendRequests)
+    const requests = await db.select().from(friendRequests)
       .where(and(eq(friendRequests.fromUserId, userId), eq(friendRequests.status, "pending")))
-      .orderBy(desc(friendRequests.id)).all();
+      .orderBy(desc(friendRequests.id));
 
     const enriched = [];
     for (const req of requests) {
-      const toUser = db.select().from(users).where(eq(users.id, req.toUserId)).get();
-      enriched.push({ ...req, toUser });
+      const toRows = await db.select().from(users).where(eq(users.id, req.toUserId));
+      enriched.push({ ...req, toUser: toRows[0] });
     }
     return enriched;
   }
 
   async getAcceptedFriends(userId: number): Promise<User[]> {
-    // Raw SQL for the OR join condition
-    const rows = sqlite.prepare(`
+    const rows = await queryClient(`
       SELECT u.id, u.username, u.display_name, u.phone, u.height_cm, u.weight_kg, u.goals, u.created_at
       FROM users u
       INNER JOIN friend_requests fr ON
-        (fr.from_user_id = ? AND fr.to_user_id = u.id AND fr.status = 'accepted')
-        OR (fr.to_user_id = ? AND fr.from_user_id = u.id AND fr.status = 'accepted')
-    `).all(userId, userId) as any[];
+        (fr.from_user_id = $1 AND fr.to_user_id = u.id AND fr.status = 'accepted')
+        OR (fr.to_user_id = $1 AND fr.from_user_id = u.id AND fr.status = 'accepted')
+    `, [userId]);
 
     return rows.map((r: any) => ({
       id: r.id,
@@ -273,153 +272,167 @@ export class DatabaseStorage implements IStorage {
   }
 
   async updateFriendRequest(id: number, status: string): Promise<FriendRequest | undefined> {
-    return db.update(friendRequests).set({ status }).where(eq(friendRequests.id, id)).returning().get();
+    const rows = await db.update(friendRequests).set({ status }).where(eq(friendRequests.id, id)).returning();
+    return rows[0];
   }
 
   async removeFriendRequest(id: number): Promise<void> {
-    db.delete(friendRequests).where(eq(friendRequests.id, id)).run();
+    await db.delete(friendRequests).where(eq(friendRequests.id, id));
   }
 
   async findExistingFriendRequest(fromUserId: number, toUserId: number): Promise<FriendRequest | undefined> {
-    // Check both directions
-    return db.select().from(friendRequests)
+    const rows = await db.select().from(friendRequests)
       .where(
         or(
           and(eq(friendRequests.fromUserId, fromUserId), eq(friendRequests.toUserId, toUserId)),
           and(eq(friendRequests.fromUserId, toUserId), eq(friendRequests.toUserId, fromUserId))
         )
-      ).get();
+      );
+    return rows[0];
   }
 
   // ── Workout Invites ────────────────────────────────────────────────────────
   async createWorkoutInvite(invite: InsertWorkoutInvite): Promise<WorkoutInvite> {
-    return db.insert(workoutInvites).values(invite).returning().get();
+    const rows = await db.insert(workoutInvites).values(invite).returning();
+    return rows[0];
   }
 
   async getWorkoutInvitesForUser(username: string): Promise<WorkoutInvite[]> {
     return db.select().from(workoutInvites)
       .where(and(eq(workoutInvites.toUsername, username), eq(workoutInvites.status, "pending")))
-      .orderBy(desc(workoutInvites.id)).all();
+      .orderBy(desc(workoutInvites.id));
   }
 
   async updateWorkoutInvite(id: number, status: string): Promise<WorkoutInvite | undefined> {
-    return db.update(workoutInvites).set({ status }).where(eq(workoutInvites.id, id)).returning().get();
+    const rows = await db.update(workoutInvites).set({ status }).where(eq(workoutInvites.id, id)).returning();
+    return rows[0];
   }
 
   async getWorkoutInvitesBySession(sessionId: number): Promise<WorkoutInvite[]> {
-    return db.select().from(workoutInvites).where(eq(workoutInvites.sessionId, sessionId)).all();
+    return db.select().from(workoutInvites).where(eq(workoutInvites.sessionId, sessionId));
   }
 
   // ── Notifications ──────────────────────────────────────────────────────────
   async createNotification(notification: InsertNotification): Promise<Notification> {
-    return db.insert(notifications).values(notification).returning().get();
+    const rows = await db.insert(notifications).values(notification).returning();
+    return rows[0];
   }
 
   async getNotificationsForUser(userId: number): Promise<Notification[]> {
     return db.select().from(notifications)
       .where(eq(notifications.userId, userId))
-      .orderBy(desc(notifications.id)).all();
+      .orderBy(desc(notifications.id));
   }
 
   async markNotificationRead(id: number): Promise<void> {
-    db.update(notifications).set({ isRead: true }).where(eq(notifications.id, id)).run();
+    await db.update(notifications).set({ isRead: true }).where(eq(notifications.id, id));
   }
 
   async getUnreadNotificationCount(userId: number): Promise<number> {
-    const rows = db.select().from(notifications)
-      .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false))).all();
+    const rows = await db.select().from(notifications)
+      .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
     return rows.length;
   }
 
   async markAllNotificationsRead(userId: number): Promise<void> {
-    db.update(notifications).set({ isRead: true }).where(eq(notifications.userId, userId)).run();
+    await db.update(notifications).set({ isRead: true }).where(eq(notifications.userId, userId));
   }
 
   // ── Exercises ──────────────────────────────────────────────────────────────
   async getAllExercises(): Promise<Exercise[]> {
-    return db.select().from(exercises).all();
+    return db.select().from(exercises);
   }
 
   async getExercisesByMuscle(muscle: string): Promise<Exercise[]> {
-    return db.select().from(exercises).where(eq(exercises.primaryMuscle, muscle)).all();
+    return db.select().from(exercises).where(eq(exercises.primaryMuscle, muscle));
   }
 
   async getExercisesByEquipment(_equipment: string[]): Promise<Exercise[]> {
-    return db.select().from(exercises).all();
+    return db.select().from(exercises);
   }
 
   async seedExercises(exerciseList: InsertExercise[]): Promise<void> {
-    for (const ex of exerciseList) {
-      db.insert(exercises).values(ex).run();
+    // Insert in batches of 50 to avoid hitting query size limits
+    for (let i = 0; i < exerciseList.length; i += 50) {
+      const batch = exerciseList.slice(i, i + 50);
+      await db.insert(exercises).values(batch);
     }
   }
 
   async getExerciseCount(): Promise<number> {
-    const result = db.select().from(exercises).all();
+    const result = await db.select().from(exercises);
     return result.length;
   }
 
   // ── Workout Plans ──────────────────────────────────────────────────────────
   async createWorkoutPlan(plan: InsertWorkoutPlan): Promise<WorkoutPlan> {
-    return db.insert(workoutPlans).values(plan).returning().get();
+    const rows = await db.insert(workoutPlans).values(plan).returning();
+    return rows[0];
   }
 
   async getWorkoutPlan(id: number): Promise<WorkoutPlan | undefined> {
-    return db.select().from(workoutPlans).where(eq(workoutPlans.id, id)).get();
+    const rows = await db.select().from(workoutPlans).where(eq(workoutPlans.id, id));
+    return rows[0];
   }
 
   async getWorkoutPlansByUser(userId: number): Promise<WorkoutPlan[]> {
     return db.select().from(workoutPlans).where(eq(workoutPlans.userId, userId))
-      .orderBy(desc(workoutPlans.id)).all();
+      .orderBy(desc(workoutPlans.id));
   }
 
   // ── Workout Sessions ───────────────────────────────────────────────────────
   async createWorkoutSession(session: InsertWorkoutSession): Promise<WorkoutSession> {
-    return db.insert(workoutSessions).values(session).returning().get();
+    const rows = await db.insert(workoutSessions).values(session).returning();
+    return rows[0];
   }
 
   async getWorkoutSession(id: number): Promise<WorkoutSession | undefined> {
-    return db.select().from(workoutSessions).where(eq(workoutSessions.id, id)).get();
+    const rows = await db.select().from(workoutSessions).where(eq(workoutSessions.id, id));
+    return rows[0];
   }
 
   async updateWorkoutSession(id: number, updates: Partial<InsertWorkoutSession>): Promise<WorkoutSession | undefined> {
-    return db.update(workoutSessions).set(updates).where(eq(workoutSessions.id, id)).returning().get();
+    const rows = await db.update(workoutSessions).set(updates).where(eq(workoutSessions.id, id)).returning();
+    return rows[0];
   }
 
   async getActiveSessionForUser(userId: number): Promise<WorkoutSession | undefined> {
-    return db.select().from(workoutSessions)
-      .where(and(eq(workoutSessions.userId, userId), eq(workoutSessions.status, "active")))
-      .get();
+    const rows = await db.select().from(workoutSessions)
+      .where(and(eq(workoutSessions.userId, userId), eq(workoutSessions.status, "active")));
+    return rows[0];
   }
 
   // ── Exercise Logs ──────────────────────────────────────────────────────────
   async createExerciseLog(log: InsertExerciseLog): Promise<ExerciseLog> {
-    return db.insert(exerciseLogs).values(log).returning().get();
+    const rows = await db.insert(exerciseLogs).values(log).returning();
+    return rows[0];
   }
 
   async getExerciseLogsBySession(sessionId: number): Promise<ExerciseLog[]> {
-    return db.select().from(exerciseLogs).where(eq(exerciseLogs.sessionId, sessionId)).all();
+    return db.select().from(exerciseLogs).where(eq(exerciseLogs.sessionId, sessionId));
   }
 
   async updateExerciseLog(id: number, updates: Partial<InsertExerciseLog>): Promise<ExerciseLog | undefined> {
-    return db.update(exerciseLogs).set(updates).where(eq(exerciseLogs.id, id)).returning().get();
+    const rows = await db.update(exerciseLogs).set(updates).where(eq(exerciseLogs.id, id)).returning();
+    return rows[0];
   }
 
   // ── Workout History ────────────────────────────────────────────────────────
   async createWorkoutHistory(history: InsertWorkoutHistory): Promise<WorkoutHistory> {
-    return db.insert(workoutHistory).values(history).returning().get();
+    const rows = await db.insert(workoutHistory).values(history).returning();
+    return rows[0];
   }
 
   async getWorkoutHistory(userId: number): Promise<WorkoutHistory[]> {
     return db.select().from(workoutHistory).where(eq(workoutHistory.userId, userId))
-      .orderBy(desc(workoutHistory.id)).all();
+      .orderBy(desc(workoutHistory.id));
   }
 
   async getRecentWorkouts(userId: number, days: number): Promise<WorkoutHistory[]> {
     const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
     return db.select().from(workoutHistory)
       .where(and(eq(workoutHistory.userId, userId), gte(workoutHistory.completedAt, since)))
-      .orderBy(desc(workoutHistory.id)).all();
+      .orderBy(desc(workoutHistory.id));
   }
 }
 
