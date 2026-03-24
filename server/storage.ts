@@ -427,4 +427,8 @@ export class DatabaseStorage implements IStorage {
   }
 }
 
-export const storage = new DatabaseStorage();
+// Use PostgreSQL when DATABASE_URL is set (Render free Postgres), otherwise SQLite
+import { PgStorage } from "./pg-storage";
+export const storage: IStorage = process.env.DATABASE_URL
+  ? new PgStorage()
+  : new DatabaseStorage();

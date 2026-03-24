@@ -62,6 +62,12 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Initialize PostgreSQL tables if DATABASE_URL is set (Render free Postgres)
+  if (process.env.DATABASE_URL) {
+    const { initPostgres } = await import("./pg-storage");
+    await initPostgres();
+  }
+
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
