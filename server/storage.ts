@@ -18,118 +18,115 @@ import { eq, and, or, gte, desc, sql } from "drizzle-orm";
 
 const DATABASE_URL = process.env.DATABASE_URL;
 if (!DATABASE_URL) {
-  throw new Error("DATABASE_URL environment variable is required. Set it to your Neon PostgreSQL connection string.");
+  console.error("ERROR: DATABASE_URL environment variable is required. Set it to your Neon PostgreSQL connection string.");
+  process.exit(1);
 }
 
 const queryClient = neon(DATABASE_URL);
 export const db = drizzle(queryClient);
 
 // ── Initialize tables (idempotent) ──────────────────────────────────────────
+const TABLE_STATEMENTS = [
+  `CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    display_name TEXT NOT NULL,
+    phone TEXT NOT NULL DEFAULT '',
+    height_cm REAL,
+    weight_kg REAL,
+    goals TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL DEFAULT (now()::text)
+  )`,
+  `CREATE TABLE IF NOT EXISTS friend_requests (
+    id SERIAL PRIMARY KEY,
+    from_user_id INTEGER NOT NULL,
+    to_user_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (now()::text)
+  )`,
+  `CREATE TABLE IF NOT EXISTS workout_invites (
+    id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    from_username TEXT NOT NULL,
+    to_username TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at TEXT NOT NULL DEFAULT (now()::text)
+  )`,
+  `CREATE TABLE IF NOT EXISTS notifications (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    body TEXT NOT NULL,
+    related_id INTEGER,
+    is_read BOOLEAN NOT NULL DEFAULT false,
+    created_at TEXT NOT NULL DEFAULT (now()::text)
+  )`,
+  `CREATE TABLE IF NOT EXISTS exercises (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    primary_muscle TEXT NOT NULL,
+    secondary_muscles TEXT NOT NULL DEFAULT '[]',
+    equipment TEXT NOT NULL DEFAULT '[]',
+    workout_types TEXT NOT NULL DEFAULT '[]',
+    is_compound BOOLEAN NOT NULL DEFAULT false,
+    instructions TEXT NOT NULL DEFAULT ''
+  )`,
+  `CREATE TABLE IF NOT EXISTS workout_plans (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    user_id INTEGER NOT NULL,
+    exercises TEXT NOT NULL DEFAULT '[]',
+    workout_types TEXT NOT NULL DEFAULT '[]',
+    goal TEXT NOT NULL DEFAULT 'Muscle Gain',
+    estimated_duration INTEGER NOT NULL DEFAULT 45,
+    intensity TEXT NOT NULL DEFAULT 'Moderate',
+    rest_between_sets INTEGER NOT NULL DEFAULT 90,
+    ai_reasoning TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (now()::text)
+  )`,
+  `CREATE TABLE IF NOT EXISTS workout_sessions (
+    id SERIAL PRIMARY KEY,
+    plan_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    participant_usernames TEXT NOT NULL DEFAULT '[]',
+    creator_username TEXT NOT NULL,
+    is_shared BOOLEAN NOT NULL DEFAULT false,
+    started_at TEXT,
+    completed_at TEXT,
+    status TEXT NOT NULL DEFAULT 'pending',
+    is_paused BOOLEAN NOT NULL DEFAULT false,
+    current_rotation_index INTEGER NOT NULL DEFAULT 0
+  )`,
+  `CREATE TABLE IF NOT EXISTS exercise_logs (
+    id SERIAL PRIMARY KEY,
+    session_id INTEGER NOT NULL,
+    exercise_id INTEGER NOT NULL,
+    exercise_name TEXT NOT NULL,
+    username TEXT NOT NULL,
+    sets TEXT NOT NULL DEFAULT '[]',
+    timestamp TEXT NOT NULL DEFAULT (now()::text)
+  )`,
+  `CREATE TABLE IF NOT EXISTS workout_history (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL,
+    plan_id INTEGER NOT NULL,
+    plan_name TEXT NOT NULL DEFAULT '',
+    total_volume REAL NOT NULL DEFAULT 0,
+    duration INTEGER NOT NULL DEFAULT 0,
+    muscles_worked TEXT NOT NULL DEFAULT '[]',
+    exercise_logs TEXT NOT NULL DEFAULT '[]',
+    was_shared BOOLEAN NOT NULL DEFAULT false,
+    participant_count INTEGER NOT NULL DEFAULT 1,
+    ai_reasoning TEXT NOT NULL DEFAULT '',
+    completed_at TEXT NOT NULL DEFAULT (now()::text)
+  )`,
+];
+
 export async function initDatabase() {
-  await queryClient(`
-    CREATE TABLE IF NOT EXISTS users (
-      id SERIAL PRIMARY KEY,
-      username TEXT NOT NULL UNIQUE,
-      display_name TEXT NOT NULL,
-      phone TEXT NOT NULL DEFAULT '',
-      height_cm REAL,
-      weight_kg REAL,
-      goals TEXT NOT NULL DEFAULT '[]',
-      created_at TEXT NOT NULL DEFAULT (now()::text)
-    );
-
-    CREATE TABLE IF NOT EXISTS friend_requests (
-      id SERIAL PRIMARY KEY,
-      from_user_id INTEGER NOT NULL,
-      to_user_id INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      created_at TEXT NOT NULL DEFAULT (now()::text)
-    );
-
-    CREATE TABLE IF NOT EXISTS workout_invites (
-      id SERIAL PRIMARY KEY,
-      session_id INTEGER NOT NULL,
-      from_username TEXT NOT NULL,
-      to_username TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      created_at TEXT NOT NULL DEFAULT (now()::text)
-    );
-
-    CREATE TABLE IF NOT EXISTS notifications (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      related_id INTEGER,
-      is_read BOOLEAN NOT NULL DEFAULT false,
-      created_at TEXT NOT NULL DEFAULT (now()::text)
-    );
-
-    CREATE TABLE IF NOT EXISTS exercises (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      primary_muscle TEXT NOT NULL,
-      secondary_muscles TEXT NOT NULL DEFAULT '[]',
-      equipment TEXT NOT NULL DEFAULT '[]',
-      workout_types TEXT NOT NULL DEFAULT '[]',
-      is_compound BOOLEAN NOT NULL DEFAULT false,
-      instructions TEXT NOT NULL DEFAULT ''
-    );
-
-    CREATE TABLE IF NOT EXISTS workout_plans (
-      id SERIAL PRIMARY KEY,
-      name TEXT NOT NULL,
-      user_id INTEGER NOT NULL,
-      exercises TEXT NOT NULL DEFAULT '[]',
-      workout_types TEXT NOT NULL DEFAULT '[]',
-      goal TEXT NOT NULL DEFAULT 'Muscle Gain',
-      estimated_duration INTEGER NOT NULL DEFAULT 45,
-      intensity TEXT NOT NULL DEFAULT 'Moderate',
-      rest_between_sets INTEGER NOT NULL DEFAULT 90,
-      ai_reasoning TEXT NOT NULL DEFAULT '',
-      created_at TEXT NOT NULL DEFAULT (now()::text)
-    );
-
-    CREATE TABLE IF NOT EXISTS workout_sessions (
-      id SERIAL PRIMARY KEY,
-      plan_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      participant_usernames TEXT NOT NULL DEFAULT '[]',
-      creator_username TEXT NOT NULL,
-      is_shared BOOLEAN NOT NULL DEFAULT false,
-      started_at TEXT,
-      completed_at TEXT,
-      status TEXT NOT NULL DEFAULT 'pending',
-      is_paused BOOLEAN NOT NULL DEFAULT false,
-      current_rotation_index INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS exercise_logs (
-      id SERIAL PRIMARY KEY,
-      session_id INTEGER NOT NULL,
-      exercise_id INTEGER NOT NULL,
-      exercise_name TEXT NOT NULL,
-      username TEXT NOT NULL,
-      sets TEXT NOT NULL DEFAULT '[]',
-      timestamp TEXT NOT NULL DEFAULT (now()::text)
-    );
-
-    CREATE TABLE IF NOT EXISTS workout_history (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER NOT NULL,
-      plan_id INTEGER NOT NULL,
-      plan_name TEXT NOT NULL DEFAULT '',
-      total_volume REAL NOT NULL DEFAULT 0,
-      duration INTEGER NOT NULL DEFAULT 0,
-      muscles_worked TEXT NOT NULL DEFAULT '[]',
-      exercise_logs TEXT NOT NULL DEFAULT '[]',
-      was_shared BOOLEAN NOT NULL DEFAULT false,
-      participant_count INTEGER NOT NULL DEFAULT 1,
-      ai_reasoning TEXT NOT NULL DEFAULT '',
-      completed_at TEXT NOT NULL DEFAULT (now()::text)
-    );
-  `);
+  for (const stmt of TABLE_STATEMENTS) {
+    await queryClient(stmt);
+  }
 }
 
 export interface IStorage {
