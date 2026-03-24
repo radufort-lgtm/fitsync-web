@@ -113,7 +113,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     saveWorkoutToStorage(null);
   }, []);
 
-  // On mount, if we have a cached user, re-fetch from server to confirm they still exist
+  // On mount, if we have a cached user, validate or re-create on server
   useEffect(() => {
     const cached = loadUserFromStorage();
     if (!cached) { setAuthLoading(false); return; }
@@ -123,10 +123,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setCurrentUserRaw(freshUser);
         saveUserToStorage(freshUser);
       })
-      .catch(() => {
-        // User no longer exists on this server, clear
-        setCurrentUserRaw(null);
-        saveUserToStorage(null);
+      .catch(async () => {
+        // Server lost data (restart). Re-create the account from local cache.
+        try {
+          const restored: User = await apiRequest("POST", "/api/users", {
+            username: cached.username,
+            displayName: cached.displayName,
+            phone: cached.phone || "",
+            heightCm: cached.heightCm,
+            weightKg: cached.weightKg,
+            goals: cached.goals,
+          });
+          setCurrentUserRaw(restored);
+          saveUserToStorage(restored);
+        } catch {
+          // If re-create also fails (e.g. username taken by someone else), clear
+          setCurrentUserRaw(null);
+          saveUserToStorage(null);
+        }
       })
       .finally(() => setAuthLoading(false));
   }, []); // run once on mount
