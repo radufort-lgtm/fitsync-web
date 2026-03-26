@@ -401,6 +401,20 @@ export async function registerRoutes(
     return res.json({ success: true });
   });
 
+  // Unfriend: find the accepted friend request between two users and remove it
+  app.delete("/api/friends/:userId/:friendUserId", async (req, res) => {
+    try {
+      const userId = Number(req.params.userId);
+      const friendUserId = Number(req.params.friendUserId);
+      const existing = await storage.findExistingFriendRequest(userId, friendUserId);
+      if (!existing) return res.status(404).json({ error: "Friendship not found" });
+      await storage.removeFriendRequest(existing.id);
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(400).json({ error: e.message });
+    }
+  });
+
   // ── Workout Invites ────────────────────────────────────────────────────────
   // Send a workout invite
   app.post("/api/workout-invites", async (req, res) => {

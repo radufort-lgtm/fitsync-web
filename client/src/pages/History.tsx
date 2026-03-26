@@ -1,19 +1,83 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion, AnimatePresence } from "framer-motion";
+import { useLocation } from "wouter";
 import { useApp } from "@/context/AppContext";
 import { apiRequest } from "@/lib/queryClient";
 import { localCache } from "@/lib/localCache";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Dumbbell, Clock, TrendingUp, ChevronDown, ChevronUp, Users, Brain } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { Dumbbell, Clock, TrendingUp, ChevronDown, ChevronUp, Users, Brain, RotateCcw, UserPlus, Loader2 } from "lucide-react";
 import type { WorkoutHistory } from "@shared/schema";
 
 const FILTERS = ["All", "This Week", "This Month"];
 
 export default function History() {
-  const { currentUser } = useApp();
+  const { currentUser, setActiveWorkout } = useApp();
+  const [, navigate] = useLocation();
+  const { toast } = useToast();
   const [filter, setFilter] = useState("All");
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [redoing, setRedoing] = useState<number | null>(null);
+
+  const redoWorkout = async (w: WorkoutHistory, invite: boolean) => {
+    if (!currentUser) return;
+    setRedoing(w.id);
+    try {
+      // Get the original plan to get exercises
+      let exercises = "[]";
+      try {
+        const plan = await apiRequest("GET", `/api/workout-plans/${w.planId}`);
+        exercises = plan.exercises;
+      } catch {
+        // Plan may not exist anymore, use empty
+      }
+
+      // Create a new plan
+      const newPlan = await apiRequest("POST", "/api/workout-plans", {
+        name: w.planName || "Workout",
+        userId: currentUser.id,
+        exercises,
+        workoutTypes: "[]",
+        goal: "Muscle Gain",
+        estimatedDuration: Math.round(w.duration / 60) || 45,
+        intensity: "Moderate",
+        restBetweenSets: 90,
+        aiReasoning: w.aiReasoning || "",
+      });
+
+      // Create session (solo for now, can invite after)
+      const session = await apiRequest("POST", "/api/workout-sessions", {
+        planId: newPlan.id,
+        userId: currentUser.id,
+        participantUsernames: JSON.stringify([currentUser.username]),
+        creatorUsername: currentUser.username,
+        isShared: false,
+        status: "pending",
+        isPaused: false,
+        currentRotationIndex: 0,
+      });
+
+      const parsedExercises = JSON.parse(exercises);
+      setActiveWorkout({
+        sessionId: session.id,
+        planId: newPlan.id,
+        planName: newPlan.name,
+        exercises: parsedExercises,
+        creatorUsername: currentUser.username,
+        isShared: false,
+        participantUsernames: [currentUser.username],
+        restBetweenSets: 90,
+        aiReasoning: newPlan.aiReasoning,
+      });
+      navigate("/workout");
+    } catch (e) {
+      toast({ title: "Failed to redo workout", variant: "destructive" });
+    } finally {
+      setRedoing(null);
+    }
+  };
 
   const { data: history = [], isLoading } = useQuery<WorkoutHistory[]>({
     queryKey: ["/api/users", currentUser?.id, "workout-history"],
@@ -183,6 +247,19 @@ export default function History() {
                               </div>
                             ))}
                           </div>
+                          <Button
+                            onClick={() => redoWorkout(w, false)}
+                            disabled={redoing === w.id}
+                            className="w-full mt-3 press-scale"
+                            variant="outline"
+                          >
+                            {redoing === w.id ? (
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : (
+                              <RotateCcw className="w-4 h-4 mr-2" />
+                            )}
+                            Redo This Workout
+                          </Button>
                         </div>
                       </motion.div>
                     )}

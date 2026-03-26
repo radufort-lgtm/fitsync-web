@@ -212,74 +212,98 @@ export default function WorkoutActive() {
       .catch(() => {});
   }, [activeWorkout?.isShared, activeWorkout?.sessionId]);
 
-  // Single stable WS connection
-  useEffect(() => {
-    if (!activeWorkout?.isShared || wsConnectedOnce.current) return;
-    wsConnectedOnce.current = true;
+  // WS message handler (extracted so reconnect reuses it)
+  const handleWsMessage = useCallback((event: MessageEvent) => {
+    try {
+      const msg = JSON.parse(event.data);
+      const creatorUsername = workoutRef.current?.creatorUsername;
+      const isCreatorNow = creatorUsername === userRef.current?.username;
 
-    const aw = activeWorkout;
-    const user = currentUser;
-    if (!aw || !user) return;
+      if (msg.type === "state-sync" && !isCreatorNow) {
+        const p = msg.payload;
+        setPhase(p.phase);
+        setCurrentRound(p.currentRound);
+        setCurrentRotation(p.currentRotation);
+        setSetSecsLeft(p.setSecsLeft);
+        setTransitionSecsLeft(p.transitionSecsLeft ?? TRANSITION_DURATION);
+        setRestSecsLeft(p.restSecsLeft);
+        setElapsedSecs(p.elapsedSecs);
+        setTransitionTarget(p.transitionTarget ?? "rest");
+        if (p.userWeights) setUserWeights(p.userWeights);
+        if (p.playAlarm) playAlarm();
+      }
 
+      if (msg.type === "user-joined") {
+        setJoinedUsers(prev => prev.includes(msg.username) ? prev : [...prev, msg.username]);
+      }
+      if (msg.type === "user-left") {
+        setJoinedUsers(prev => prev.filter(u => u !== msg.username));
+      }
+      if (msg.type === "invite-accepted" || msg.type === "participant-joined") {
+        setInviteStatuses(prev => prev.map(inv => inv.username === msg.username ? { ...inv, status: "accepted" } : inv));
+      }
+      if (msg.type === "invite-declined") {
+        setInviteStatuses(prev => prev.map(inv => inv.username === msg.username ? { ...inv, status: "declined" } : inv));
+      }
+      if (msg.type === "weight-update") {
+        setUserWeights(prev => ({
+          ...prev,
+          [msg.username]: { ...(prev[msg.username] || {}), [msg.stationIdx]: msg.weight },
+        }));
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Connect (or reconnect) WS for shared workouts
+  const connectWs = useCallback(() => {
+    const aw = workoutRef.current;
+    const user = userRef.current;
+    if (!aw?.isShared || !user) return;
+    // Close stale connection if any
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      wsRef.current.close();
+    }
     const ws = new WebSocket(getWsUrl());
     wsRef.current = ws;
-
     ws.onopen = () => {
       setWsConnected(true);
       ws.send(JSON.stringify({ type: "join", sessionId: aw.sessionId, username: user.username }));
+      // Request latest state from server (important after phone sleep)
+      ws.send(JSON.stringify({ type: "request-state", sessionId: aw.sessionId }));
     };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        const creatorUsername = workoutRef.current?.creatorUsername;
-        const isCreatorNow = creatorUsername === userRef.current?.username;
-
-        if (msg.type === "state-sync" && !isCreatorNow) {
-          const p = msg.payload;
-          setPhase(p.phase);
-          setCurrentRound(p.currentRound);
-          setCurrentRotation(p.currentRotation);
-          setSetSecsLeft(p.setSecsLeft);
-          setTransitionSecsLeft(p.transitionSecsLeft ?? TRANSITION_DURATION);
-          setRestSecsLeft(p.restSecsLeft);
-          setElapsedSecs(p.elapsedSecs);
-          setTransitionTarget(p.transitionTarget ?? "rest");
-          if (p.userWeights) setUserWeights(p.userWeights);
-          // Play alarm on phase transitions
-          if (p.playAlarm) playAlarm();
-        }
-
-        if (msg.type === "user-joined") {
-          setJoinedUsers(prev => prev.includes(msg.username) ? prev : [...prev, msg.username]);
-        }
-        if (msg.type === "user-left") {
-          setJoinedUsers(prev => prev.filter(u => u !== msg.username));
-        }
-        if (msg.type === "invite-accepted" || msg.type === "participant-joined") {
-          setInviteStatuses(prev => prev.map(inv => inv.username === msg.username ? { ...inv, status: "accepted" } : inv));
-        }
-        if (msg.type === "invite-declined") {
-          setInviteStatuses(prev => prev.map(inv => inv.username === msg.username ? { ...inv, status: "declined" } : inv));
-        }
-        // Weight updates from other users
-        if (msg.type === "weight-update") {
-          setUserWeights(prev => ({
-            ...prev,
-            [msg.username]: { ...(prev[msg.username] || {}), [msg.stationIdx]: msg.weight },
-          }));
-        }
-      } catch { /* ignore */ }
-    };
-
+    ws.onmessage = handleWsMessage;
     ws.onclose = () => setWsConnected(false);
+    ws.onerror = () => {};
+  }, [handleWsMessage]);
 
+  // Initial WS connection
+  useEffect(() => {
+    if (!activeWorkout?.isShared || wsConnectedOnce.current) return;
+    wsConnectedOnce.current = true;
+    connectWs();
     return () => {
-      ws.close();
-      wsRef.current = null;
+      if (wsRef.current) { wsRef.current.close(); wsRef.current = null; }
       wsConnectedOnce.current = false;
     };
-  }, [activeWorkout?.isShared]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeWorkout?.isShared, connectWs]);
+
+  // Reconnect WS when phone wakes up (visibility change)
+  useEffect(() => {
+    if (!activeWorkout?.isShared) return;
+    const onVisChange = () => {
+      if (document.visibilityState === "visible") {
+        // If WS is dead, reconnect
+        if (!wsRef.current || wsRef.current.readyState === WebSocket.CLOSED || wsRef.current.readyState === WebSocket.CLOSING) {
+          connectWs();
+        } else if (wsRef.current.readyState === WebSocket.OPEN) {
+          // WS is still alive — just request fresh state
+          wsRef.current.send(JSON.stringify({ type: "request-state", sessionId: activeWorkout.sessionId }));
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVisChange);
+    return () => document.removeEventListener("visibilitychange", onVisChange);
+  }, [activeWorkout?.isShared, activeWorkout?.sessionId, connectWs]);
 
   // Stable send
   const sendStateUpdate = useCallback((overrides?: Record<string, any>) => {
@@ -431,9 +455,9 @@ export default function WorkoutActive() {
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [phase, activeWorkout?.creatorUsername, activeWorkout?.isShared, currentUser?.username, sendStateUpdate]);
 
-  // Wake Lock — keep screen on during active workout phases
+  // Wake Lock — keep screen on during entire workout (all phases)
   useEffect(() => {
-    const shouldLock = phase === "active" || phase === "transition" || phase === "rest" || phase === "weighIn";
+    const shouldLock = phase !== "complete";
     if (!shouldLock) {
       if (wakeLockRef.current) {
         wakeLockRef.current.release().catch(() => {});

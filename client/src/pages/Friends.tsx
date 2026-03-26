@@ -86,14 +86,8 @@ export default function Friends() {
 
   // Remove friend
   const removeMutation = useMutation({
-    mutationFn: async (friendId: number) => {
-      // Find the friend request between current user and this friend
-      // We need to find the request ID — check both directions
-      // For simplicity, we use a search approach
-      const allFriends = await apiRequest("GET", `/api/users/${currentUser?.id}/friends`);
-      // We'll just delete by searching — but we need the request ID
-      // Actually, the delete endpoint takes request ID. Let's use a different approach.
-      return apiRequest("DELETE", `/api/friend-requests/${friendId}`);
+    mutationFn: async (friendUserId: number) => {
+      return apiRequest("DELETE", `/api/friends/${currentUser?.id}/${friendUserId}`);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser?.id, "friends"] });
@@ -295,11 +289,8 @@ export default function Friends() {
                     </div>
                     <button
                       data-testid={`remove-friend-${f.username}`}
-                      onClick={() => {
-                        // We need to find the friend request ID to delete
-                        // For now, toast a message
-                        toast({ title: "Hold to remove", description: "Feature coming soon" });
-                      }}
+                      onClick={() => removeMutation.mutate(f.id)}
+                      disabled={removeMutation.isPending}
                       className="w-8 h-8 flex items-center justify-center rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
                     >
                       <UserMinus className="w-3.5 h-3.5" />

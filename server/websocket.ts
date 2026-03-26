@@ -11,6 +11,9 @@ interface WsClient {
 // Map of sessionId → Set of connected clients (for workout sessions)
 const sessions = new Map<number, Set<WsClient>>();
 
+// Cache the latest state for each session so we can serve it on request-state
+const sessionLatestState = new Map<number, any>();
+
 // Map of username → Set of WebSocket connections (for notifications/global)
 const userConnections = new Map<string, Set<WebSocket>>();
 
@@ -98,11 +101,25 @@ export function setupWebSocket(httpServer: Server) {
               weight: msg.payload.weight,
             }, client.ws); // exclude sender
           } else {
+            // Store latest state for this session so we can serve it on request-state
+            sessionLatestState.set(client.sessionId, msg.payload);
             broadcast(client.sessionId, {
               type: "state-sync",
               serverTimestamp: Date.now(),
               payload: msg.payload,
             }, client.ws); // exclude sender
+          }
+        }
+
+        // Non-creator requests current state (e.g. after phone wakes up)
+        if (msg.type === "request-state" && client) {
+          const latest = sessionLatestState.get(client.sessionId);
+          if (latest) {
+            ws.send(JSON.stringify({
+              type: "state-sync",
+              serverTimestamp: Date.now(),
+              payload: latest,
+            }));
           }
         }
       } catch (e) {
@@ -138,6 +155,7 @@ export function setupWebSocket(httpServer: Server) {
 
           if (sessionClients.size === 0) {
             sessions.delete(client.sessionId);
+            sessionLatestState.delete(client.sessionId);
           }
         }
       }
