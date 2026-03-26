@@ -26,7 +26,7 @@ const EQUIPMENT = [
 ];
 
 const GOALS = ["Strength", "Muscle Gain", "Fat Loss", "Performance", "General Fitness"];
-const DURATIONS = [5, 10, 15, 20, 25, 30, 45, 50, 55, 60];
+const DURATIONS = [5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60];
 const INTENSITIES = ["Light", "Moderate", "Intense", "Extreme"];
 const BREAK_OPTIONS = [30, 60, 90, 120, 180];
 const ROTATION_OPTIONS = [1, 2, 3, 4, 5];
