@@ -157,6 +157,7 @@ export interface IStorage {
   updateFriendRequest(id: number, status: string): Promise<FriendRequest | undefined>;
   removeFriendRequest(id: number): Promise<void>;
   findExistingFriendRequest(fromUserId: number, toUserId: number): Promise<FriendRequest | undefined>;
+  unfriendUsers(userId1: number, userId2: number): Promise<void>;
 
   // Workout Invites
   createWorkoutInvite(invite: InsertWorkoutInvite): Promise<WorkoutInvite>;
@@ -295,6 +296,18 @@ export class DatabaseStorage implements IStorage {
           and(eq(friendRequests.fromUserId, toUserId), eq(friendRequests.toUserId, fromUserId))
         )
       ).get();
+  }
+
+  async unfriendUsers(userId1: number, userId2: number): Promise<void> {
+    // Delete ALL rows between these two users regardless of status — cleans up
+    // accepted friendships, pending requests, and any lingering declined rows at once.
+    db.delete(friendRequests)
+      .where(
+        or(
+          and(eq(friendRequests.fromUserId, userId1), eq(friendRequests.toUserId, userId2)),
+          and(eq(friendRequests.fromUserId, userId2), eq(friendRequests.toUserId, userId1))
+        )
+      ).run();
   }
 
   // ── Workout Invites ────────────────────────────────────────────────────────

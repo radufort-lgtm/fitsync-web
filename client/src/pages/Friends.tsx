@@ -89,9 +89,14 @@ export default function Friends() {
     mutationFn: async (friendUserId: number) => {
       return apiRequest("DELETE", `/api/friends/${currentUser?.id}/${friendUserId}`);
     },
-    onSuccess: () => {
+    onSuccess: (_, friendUserId) => {
+      // Immediately drop them from local cache so a server restart doesn't revive the friendship
+      localCache.saveFriends(localCache.getFriends().filter((f: any) => f.id !== friendUserId));
       queryClient.invalidateQueries({ queryKey: ["/api/users", currentUser?.id, "friends"] });
       toast({ title: "Friend removed" });
+    },
+    onError: () => {
+      toast({ title: "Failed to remove friend", variant: "destructive" });
     },
   });
 
