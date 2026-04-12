@@ -71,7 +71,7 @@ export default function History() {
         restBetweenSets: 90,
         aiReasoning: newPlan.aiReasoning,
       });
-      navigate("/workout");
+      navigate("/workout/active");
     } catch (e) {
       toast({ title: "Failed to redo workout", variant: "destructive" });
     } finally {
