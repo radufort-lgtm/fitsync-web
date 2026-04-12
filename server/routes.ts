@@ -5,6 +5,7 @@ import { insertUserSchema, type PlannedExercise, type InsertExercise, type Exerc
 import { z } from "zod";
 import { sendToUser, broadcastToSession } from "./websocket";
 import { SEED_EXERCISES } from "./exercises";
+import Anthropic from "@anthropic-ai/sdk";
 
 // ── AI Workout Generation ─────────────────────────────────────────────────────
 async function generateWorkoutPlan(params: {
@@ -666,6 +667,67 @@ export async function registerRoutes(
     const days = Number(req.query.days) || 7;
     const history = await storage.getRecentWorkouts(Number(req.params.userId), days);
     return res.json(history);
+  });
+
+  // ── Exercise Instructions (AI-generated, cached) ───────────────────────────
+  app.get("/api/exercises/:id/instructions", async (req, res) => {
+    try {
+      const exerciseId = Number(req.params.id);
+      const exercise = await storage.getExerciseById(exerciseId);
+      if (!exercise) return res.status(404).json({ error: "Exercise not found" });
+
+      // Return cached instructions if already generated
+      if (exercise.instructions && exercise.instructions.trim().length > 20) {
+        try {
+          return res.json(JSON.parse(exercise.instructions));
+        } catch {
+          return res.json({ raw: exercise.instructions });
+        }
+      }
+
+      // Generate with Claude
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) return res.status(503).json({ error: "AI instructions not configured" });
+
+      const client = new Anthropic({ apiKey });
+      const message = await client.messages.create({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 512,
+        messages: [
+          {
+            role: "user",
+            content: `You are a professional fitness coach. Generate clear, practical instructions for performing "${exercise.name}" (targets: ${exercise.primaryMuscle}).
+
+Return ONLY a JSON object with this exact structure (no markdown, no extra text):
+{
+  "steps": ["step 1 text", "step 2 text", "step 3 text", "step 4 text"],
+  "tip": "one key coaching cue for best results",
+  "avoid": "one common mistake to avoid"
+}
+
+Keep each step to 1-2 sentences. Aim for 4-5 steps.`,
+          },
+        ],
+      });
+
+      const raw = (message.content[0] as any).text as string;
+
+      // Parse and validate the JSON response
+      let parsed: { steps: string[]; tip: string; avoid: string };
+      try {
+        parsed = JSON.parse(raw.trim());
+      } catch {
+        // If Claude returned something unexpected, wrap it
+        parsed = { steps: [raw], tip: "", avoid: "" };
+      }
+
+      // Cache in the database so we never call Claude again for this exercise
+      await storage.updateExerciseInstructions(exerciseId, JSON.stringify(parsed));
+
+      return res.json(parsed);
+    } catch (e: any) {
+      return res.status(500).json({ error: "Failed to generate instructions" });
+    }
   });
 
   return httpServer;
