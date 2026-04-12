@@ -173,10 +173,12 @@ export interface IStorage {
 
   // Exercises
   getAllExercises(): Promise<Exercise[]>;
+  getExerciseById(id: number): Promise<Exercise | undefined>;
   getExercisesByMuscle(muscle: string): Promise<Exercise[]>;
   getExercisesByEquipment(equipment: string[]): Promise<Exercise[]>;
   seedExercises(exerciseList: InsertExercise[]): Promise<void>;
   getExerciseCount(): Promise<number>;
+  updateExerciseInstructions(id: number, instructions: string): Promise<void>;
 
   // Workout Plans
   createWorkoutPlan(plan: InsertWorkoutPlan): Promise<WorkoutPlan>;
@@ -361,6 +363,14 @@ export class DatabaseStorage implements IStorage {
   async getExerciseCount(): Promise<number> {
     const result = db.select().from(exercises).all();
     return result.length;
+  }
+
+  async getExerciseById(id: number): Promise<Exercise | undefined> {
+    return db.select().from(exercises).where(eq(exercises.id, id)).get();
+  }
+
+  async updateExerciseInstructions(id: number, instructions: string): Promise<void> {
+    db.update(exercises).set({ instructions }).where(eq(exercises.id, id)).run();
   }
 
   // ── Workout Plans ──────────────────────────────────────────────────────────
