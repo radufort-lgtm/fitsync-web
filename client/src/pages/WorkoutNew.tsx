@@ -330,34 +330,61 @@ export default function WorkoutNew() {
             {/* Step 0: Group Size */}
             {actual === 0 && (
               <div>
-                <div className="mb-6">
+                <div className="mb-8">
                   <h2 className="text-xl font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>Who's training?</h2>
                   <p className="text-muted-foreground text-sm">Training solo or with friends?</p>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {[1, 2, 3, 4].map(n => (
+                <div className="flex flex-col items-center gap-8 py-4">
+                  {/* +/- stepper */}
+                  <div className="flex items-center gap-8">
                     <button
-                      key={n}
-                      data-testid={`group-size-${n}`}
-                      onClick={() => setConfig(c => ({ ...c, groupSize: n, participants: n === 1 ? [] : c.participants }))}
-                      className={`relative p-5 rounded-2xl border text-center transition-all duration-150 press-scale ${
-                        config.groupSize === n
-                          ? "border-primary bg-primary/10"
-                          : "border-border bg-card hover:border-primary/40"
-                      }`}
+                      data-testid="group-size-decrease"
+                      onClick={() => setConfig(c => {
+                        const next = Math.max(1, c.groupSize - 1);
+                        return { ...c, groupSize: next, participants: next === 1 ? [] : c.participants.slice(0, next - 1) };
+                      })}
+                      disabled={config.groupSize <= 1}
+                      className="w-16 h-16 flex items-center justify-center rounded-2xl bg-secondary text-muted-foreground hover:text-foreground hover:bg-secondary/80 disabled:opacity-25 disabled:cursor-not-allowed transition-all press-scale"
                     >
-                      {config.groupSize === n && (
-                        <div className="absolute top-2 right-2 w-5 h-5 bg-primary rounded-full flex items-center justify-center">
-                          <Check className="w-3 h-3 text-primary-foreground" />
-                        </div>
-                      )}
-                      <div className="text-3xl mb-2">
-                        {n === 1 ? "🧍" : n === 2 ? "👥" : n === 3 ? "👨‍👩‍👦" : "👨‍👩‍👧‍👦"}
-                      </div>
-                      <div className="font-bold text-sm">{n === 1 ? "Solo" : `${n} People`}</div>
-                      <div className="text-xs text-muted-foreground mt-1">{n === 1 ? "Just me" : `${n - 1} friend${n > 2 ? "s" : ""}`}</div>
+                      <Minus className="w-7 h-7" />
                     </button>
-                  ))}
+
+                    <div className="flex flex-col items-center min-w-[90px]">
+                      <div
+                        className="text-7xl font-bold text-primary tabular-nums"
+                        style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}
+                        data-testid="group-size-display"
+                      >
+                        {config.groupSize}
+                      </div>
+                      <div className="text-sm text-muted-foreground mt-1">
+                        {config.groupSize === 1 ? "person" : "people"}
+                      </div>
+                    </div>
+
+                    <button
+                      data-testid="group-size-increase"
+                      onClick={() => setConfig(c => ({ ...c, groupSize: c.groupSize + 1 }))}
+                      className="w-16 h-16 flex items-center justify-center rounded-2xl bg-primary text-primary-foreground hover:bg-primary/90 transition-all press-scale"
+                    >
+                      <Plus className="w-7 h-7" />
+                    </button>
+                  </div>
+
+                  {/* Contextual label */}
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="text-4xl">
+                      {config.groupSize === 1 ? "🧍" : config.groupSize === 2 ? "👥" : config.groupSize === 3 ? "👨‍👩‍👦" : config.groupSize === 4 ? "👨‍👩‍👧‍👦" : "👥"}
+                    </div>
+                    <div className="text-base font-semibold">
+                      {config.groupSize === 1 ? "Solo" : `Group of ${config.groupSize}`}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {config.groupSize === 1
+                        ? "Just me — no friends invited"
+                        : `${config.groupSize - 1} friend${config.groupSize > 2 ? "s" : ""} will be invited`}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
@@ -367,7 +394,7 @@ export default function WorkoutNew() {
               <div>
                 <div className="mb-6">
                   <h2 className="text-xl font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>Add Friends</h2>
-                  <p className="text-muted-foreground text-sm">Add up to {config.groupSize - 1} friend{config.groupSize > 2 ? "s" : ""}.</p>
+                  <p className="text-muted-foreground text-sm">Add {config.groupSize - 1} friend{config.groupSize > 2 ? "s" : ""} to this workout.</p>
                 </div>
 
                 <div className="flex gap-2 mb-4">

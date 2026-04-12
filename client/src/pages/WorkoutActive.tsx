@@ -141,6 +141,8 @@ export default function WorkoutActive() {
   const wsConnectedOnce = useRef(false);
   const wakeLockRef = useRef<any>(null);
   const localTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevPhaseRef = useRef<WorkoutPhase>("active"); // phase before pausing
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Refs for stable reads
   const stateRef = useRef({
@@ -272,7 +274,18 @@ export default function WorkoutActive() {
       ws.send(JSON.stringify({ type: "request-state", sessionId: aw.sessionId }));
     };
     ws.onmessage = handleWsMessage;
-    ws.onclose = () => setWsConnected(false);
+    ws.onclose = () => {
+      setWsConnected(false);
+      // Auto-reconnect if the workout is still in progress (handles silent drops & server-side termination of dead connections)
+      if (stateRef.current.phase !== "complete" && workoutRef.current?.isShared) {
+        if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = setTimeout(() => {
+          if (workoutRef.current?.isShared && stateRef.current.phase !== "complete") {
+            connectWs();
+          }
+        }, 3000);
+      }
+    };
     ws.onerror = () => {};
   }, [handleWsMessage]);
 
@@ -362,6 +375,19 @@ export default function WorkoutActive() {
 
     return () => { if (heartbeatRef.current) clearInterval(heartbeatRef.current); };
   }, [activeWorkout?.isShared, activeWorkout?.creatorUsername, currentUser?.username, sendStateUpdate]);
+
+  // Periodic state resync for non-creators — keeps the WS alive and recovers missed updates
+  useEffect(() => {
+    if (!activeWorkout?.isShared) return;
+    const isCreatorNow = activeWorkout?.creatorUsername === currentUser?.username;
+    if (isCreatorNow) return;
+    const syncInterval = setInterval(() => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: "request-state", sessionId: activeWorkout.sessionId }));
+      }
+    }, 10000);
+    return () => clearInterval(syncInterval);
+  }, [activeWorkout?.isShared, activeWorkout?.creatorUsername, activeWorkout?.sessionId, currentUser?.username]);
 
   // Main timer — drives all countdowns for creator (or solo)
   useEffect(() => {
@@ -526,6 +552,7 @@ export default function WorkoutActive() {
       if (timerRef.current) clearInterval(timerRef.current);
       if (heartbeatRef.current) clearInterval(heartbeatRef.current);
       if (localTimerRef.current) clearInterval(localTimerRef.current);
+      if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
       if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; }
     };
   }, []);
@@ -630,13 +657,17 @@ export default function WorkoutActive() {
   const togglePause = async () => {
     if (!isCreator) return;
     if (phase === "active" || phase === "rest" || phase === "transition") {
+      prevPhaseRef.current = phase;
       setPhase("paused");
       sendStateUpdate({ phase: "paused" });
       await apiRequest("PATCH", `/api/workout-sessions/${activeWorkout.sessionId}`, { isPaused: true, status: "paused" }).catch(() => {});
     } else if (phase === "paused") {
-      // Resume to active for simplicity
-      setPhase("active");
-      sendStateUpdate({ phase: "active" });
+      const resumePhase = prevPhaseRef.current;
+      // If resuming to active but the timer ran out (setSecsLeft is 0), reset it so the set runs properly
+      const resumeSecsLeft = (resumePhase === "active" && setSecsLeft <= 0) ? SET_DURATION : setSecsLeft;
+      if (resumePhase === "active" && setSecsLeft <= 0) setSetSecsLeft(SET_DURATION);
+      setPhase(resumePhase);
+      sendStateUpdate({ phase: resumePhase, setSecsLeft: resumeSecsLeft });
       await apiRequest("PATCH", `/api/workout-sessions/${activeWorkout.sessionId}`, { isPaused: false, status: "active" }).catch(() => {});
     }
   };

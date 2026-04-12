@@ -44,7 +44,25 @@ export function broadcastToSession(sessionId: number, message: object, exclude?:
 export function setupWebSocket(httpServer: Server) {
   const wss = new WebSocketServer({ server: httpServer, path: "/ws" });
 
+  // Heartbeat: ping every 30s, terminate connections that don't respond.
+  // This causes the client to receive a proper close event so it can reconnect.
+  const heartbeatInterval = setInterval(() => {
+    wss.clients.forEach(ws => {
+      if ((ws as any)._wsAlive === false) {
+        ws.terminate();
+        return;
+      }
+      (ws as any)._wsAlive = false;
+      ws.ping();
+    });
+  }, 30000);
+
+  wss.on("close", () => clearInterval(heartbeatInterval));
+
   wss.on("connection", (ws) => {
+    (ws as any)._wsAlive = true;
+    ws.on("pong", () => { (ws as any)._wsAlive = true; });
+
     let registeredUsername: string | null = null;
     let client: WsClient | null = null;
 
