@@ -11,12 +11,8 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Play, Pause, Square, SkipForward, Trophy, Check,
   ChevronRight, Timer, X, Wifi, Users, Clock, Loader2,
-  UserCheck, UserX, Dumbbell, Repeat, Volume2, BookOpen,
-  AlertTriangle, Lightbulb
+  UserCheck, UserX, Dumbbell, Repeat, Volume2
 } from "lucide-react";
-import {
-  Sheet, SheetContent, SheetHeader, SheetTitle,
-} from "@/components/ui/sheet";
 import type { PlannedExercise, SetLog } from "@shared/schema";
 
 import {
@@ -138,12 +134,6 @@ export default function WorkoutActive() {
   // Track all user weights for display: { username: { stationIdx: weight } }
   const [userWeights, setUserWeights] = useState<Record<string, Record<number, string>>>({});
 
-  // How To sheet
-  const [showHowTo, setShowHowTo] = useState(false);
-  const [howToData, setHowToData] = useState<{ steps: string[]; tip: string; avoid: string } | null>(null);
-  const [howToLoading, setHowToLoading] = useState(false);
-  const [howToExerciseId, setHowToExerciseId] = useState<number | null>(null);
-  const [howToExerciseName, setHowToExerciseName] = useState("");
 
   // Timers
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -371,24 +361,6 @@ export default function WorkoutActive() {
       },
     }));
   }, []);
-
-  // Open the How To sheet — fetches Claude-generated instructions (cached after first load)
-  const openHowTo = useCallback(async (exerciseId: number, exerciseName: string) => {
-    setShowHowTo(true);
-    setHowToExerciseName(exerciseName);
-    if (howToExerciseId === exerciseId && howToData) return; // already loaded
-    setHowToLoading(true);
-    setHowToExerciseId(exerciseId);
-    setHowToData(null);
-    try {
-      const data = await apiRequest("GET", `/api/exercises/${exerciseId}/instructions`);
-      setHowToData(data);
-    } catch {
-      setHowToData({ steps: ["Instructions unavailable — check your connection."], tip: "", avoid: "" });
-    } finally {
-      setHowToLoading(false);
-    }
-  }, [howToExerciseId, howToData]);
 
   // Heartbeat every 3s during active phases
   useEffect(() => {
@@ -867,16 +839,7 @@ export default function WorkoutActive() {
               className="space-y-5">
               <div className="text-center">
                 <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Your Station</div>
-                <div className="flex items-center justify-center gap-2 mb-1">
-                  <h2 className="text-2xl font-bold" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>{myExercise.exerciseName}</h2>
-                  <button
-                    onClick={() => openHowTo(myExercise.exerciseId, myExercise.exerciseName)}
-                    className="w-7 h-7 flex items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25 transition-colors flex-shrink-0"
-                    title="How to do this exercise"
-                  >
-                    <BookOpen className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>{myExercise.exerciseName}</h2>
                 <span className="text-xs px-2 py-1 bg-primary/10 text-primary rounded-full font-medium">{myExercise.primaryMuscle}</span>
               </div>
 
@@ -938,16 +901,7 @@ export default function WorkoutActive() {
 
               <div className="text-center mb-4">
                 <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">Your Station</div>
-                <div className="flex items-center justify-center gap-2 mb-1">
-                  <h2 className="text-xl font-bold" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>{myExercise.exerciseName}</h2>
-                  <button
-                    onClick={() => openHowTo(myExercise.exerciseId, myExercise.exerciseName)}
-                    className="w-7 h-7 flex items-center justify-center rounded-full bg-primary/15 text-primary hover:bg-primary/25 transition-colors flex-shrink-0"
-                    title="How to do this exercise"
-                  >
-                    <BookOpen className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                <h2 className="text-xl font-bold" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>{myExercise.exerciseName}</h2>
                 <span className="text-xs px-2 py-1 bg-primary/10 text-primary rounded-full font-medium">{myExercise.primaryMuscle}</span>
                 {weight !== "0" && <div className="text-sm text-muted-foreground mt-2">{weight} lbs</div>}
               </div>
@@ -1151,74 +1105,6 @@ export default function WorkoutActive() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ─── How To Sheet ─── */}
-      <Sheet open={showHowTo} onOpenChange={setShowHowTo}>
-        <SheetContent
-          side="bottom"
-          className="bg-card border-t border-border rounded-t-3xl px-0 pb-10 max-h-[80vh] overflow-y-auto"
-        >
-          <SheetHeader className="px-6 pb-4 border-b border-border/50">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-primary/15 flex items-center justify-center flex-shrink-0">
-                <BookOpen className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <SheetTitle className="text-left text-base font-bold leading-tight" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>
-                  {howToExerciseName}
-                </SheetTitle>
-                <p className="text-xs text-muted-foreground text-left mt-0.5">How to perform this exercise</p>
-              </div>
-            </div>
-          </SheetHeader>
-
-          <div className="px-6 pt-5">
-            {howToLoading && (
-              <div className="flex flex-col items-center justify-center py-10 gap-3">
-                <Loader2 className="w-7 h-7 text-primary animate-spin" />
-                <p className="text-sm text-muted-foreground">Generating instructions...</p>
-              </div>
-            )}
-
-            {!howToLoading && howToData && (
-              <div className="space-y-5">
-                {/* Steps */}
-                <div className="space-y-3">
-                  {howToData.steps.map((step, i) => (
-                    <div key={i} className="flex gap-3">
-                      <div className="w-6 h-6 rounded-full bg-primary flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-[11px] font-bold text-primary-foreground">{i + 1}</span>
-                      </div>
-                      <p className="text-sm leading-relaxed flex-1">{step}</p>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Tip */}
-                {howToData.tip && (
-                  <div className="flex gap-3 p-3.5 bg-primary/8 border border-primary/20 rounded-xl">
-                    <Lightbulb className="w-4 h-4 text-primary flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-semibold text-primary uppercase tracking-wide mb-1">Pro Tip</p>
-                      <p className="text-sm text-foreground/90 leading-relaxed">{howToData.tip}</p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Avoid */}
-                {howToData.avoid && (
-                  <div className="flex gap-3 p-3.5 bg-destructive/8 border border-destructive/20 rounded-xl">
-                    <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0 mt-0.5" />
-                    <div>
-                      <p className="text-xs font-semibold text-destructive uppercase tracking-wide mb-1">Avoid</p>
-                      <p className="text-sm text-foreground/90 leading-relaxed">{howToData.avoid}</p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        </SheetContent>
-      </Sheet>
     </div>
   );
 }
