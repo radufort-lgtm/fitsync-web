@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
 import { Link, useLocation } from "wouter";
@@ -8,11 +9,61 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import FitSyncLogo from "@/components/FitSyncLogo";
 import NotificationBell from "@/components/NotificationBell";
+import { useToast } from "@/hooks/use-toast";
 import {
   Dumbbell, Flame, TrendingUp, Clock, Users, ChevronRight,
-  Zap, Brain, Moon, Sun, RotateCcw
+  Zap, Brain, Moon, Sun, RotateCcw, Award, Target, Bookmark, Trash2
 } from "lucide-react";
 import type { WorkoutHistory } from "@shared/schema";
+
+function dateKey(d: Date) {
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+
+function getStreak(history: WorkoutHistory[]): number {
+  if (history.length === 0) return 0;
+  const workoutDays = new Set<string>();
+  for (const h of history) {
+    workoutDays.add(dateKey(new Date(h.completedAt)));
+  }
+  let streak = 0;
+  const checkDate = new Date();
+  // If today has no workout yet, start checking from yesterday (streak may still be live)
+  if (!workoutDays.has(dateKey(checkDate))) {
+    checkDate.setDate(checkDate.getDate() - 1);
+  }
+  while (workoutDays.has(dateKey(checkDate))) {
+    streak++;
+    checkDate.setDate(checkDate.getDate() - 1);
+  }
+  return streak;
+}
+
+function getWeakestMuscle(history: WorkoutHistory[]): { muscle: string; daysSince: number } | null {
+  const muscleLastTrained: Record<string, Date> = {};
+  for (const h of history) {
+    const muscles: string[] = JSON.parse(h.musclesWorked || "[]");
+    const date = new Date(h.completedAt);
+    for (const m of muscles) {
+      if (!muscleLastTrained[m] || date > muscleLastTrained[m]) muscleLastTrained[m] = date;
+    }
+  }
+  const allMuscles = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Core", "Calves"];
+  let weakest: { muscle: string; daysSince: number } | null = null;
+  for (const muscle of allMuscles) {
+    const last = muscleLastTrained[muscle];
+    const daysSince = last ? Math.floor((Date.now() - last.getTime()) / 86400000) : 999;
+    if (daysSince >= 4 && (!weakest || daysSince > weakest.daysSince)) {
+      weakest = { muscle, daysSince };
+    }
+  }
+  return weakest;
+}
+
+function getPersonalBest(history: WorkoutHistory[]): WorkoutHistory | null {
+  if (history.length === 0) return null;
+  return history.reduce((best, h) => (h.totalVolume || 0) > (best.totalVolume || 0) ? h : best);
+}
 
 function getGreeting(name: string) {
   const h = new Date().getHours();
@@ -118,8 +169,10 @@ const cardVariants = {
 };
 
 export default function Dashboard() {
-  const { currentUser, isDark, toggleDark } = useApp();
+  const { currentUser, isDark, toggleDark, setActiveWorkout } = useApp();
   const [, navigate] = useLocation();
+  const { toast } = useToast();
+  const [templates, setTemplates] = useState<any[]>(() => localCache.getTemplates());
 
   const { data: historyData, isLoading: historyLoading } = useQuery<WorkoutHistory[]>({
     queryKey: ["/api/users", currentUser?.id, "workout-history"],
@@ -146,6 +199,50 @@ export default function Dashboard() {
   const muscleBalance = getMuscleBalance(history);
   const recommendations = getAIRecommendations(history);
   const recentWorkouts = history.slice(0, 3);
+  const streak = getStreak(history);
+  const weakestMuscle = getWeakestMuscle(history);
+  const personalBest = getPersonalBest(history);
+
+  const quickStartTemplate = async (tpl: any) => {
+    if (!currentUser) return;
+    try {
+      const newPlan = await apiRequest("POST", "/api/workout-plans", {
+        name: tpl.name,
+        userId: currentUser.id,
+        exercises: JSON.stringify(tpl.exercises),
+        workoutTypes: "[]",
+        goal: tpl.goal || "Muscle Gain",
+        estimatedDuration: 45,
+        intensity: "Moderate",
+        restBetweenSets: tpl.restBetweenSets || 90,
+        aiReasoning: "",
+      });
+      const session = await apiRequest("POST", "/api/workout-sessions", {
+        planId: newPlan.id,
+        userId: currentUser.id,
+        participantUsernames: JSON.stringify([currentUser.username]),
+        creatorUsername: currentUser.username,
+        isShared: false,
+        status: "pending",
+        isPaused: false,
+        currentRotationIndex: 0,
+      });
+      setActiveWorkout({
+        sessionId: session.id,
+        planId: newPlan.id,
+        planName: newPlan.name,
+        exercises: tpl.exercises,
+        creatorUsername: currentUser.username,
+        isShared: false,
+        participantUsernames: [currentUser.username],
+        restBetweenSets: tpl.restBetweenSets || 90,
+        aiReasoning: "",
+      });
+      navigate("/workout/active");
+    } catch {
+      toast({ title: "Failed to start template", variant: "destructive" });
+    }
+  };
 
   const formatVolume = (v: number) =>
     v >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.round(v).toString();
@@ -184,10 +281,25 @@ export default function Dashboard() {
       <div className="px-4 space-y-4">
         {/* Greeting */}
         <motion.div custom={0} variants={cardVariants} initial="hidden" animate="visible">
-          <h1 className="text-xl font-bold" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>
-            {currentUser ? getGreeting(currentUser.displayName) : "Welcome back"}
-          </h1>
-          <p className="text-muted-foreground text-sm mt-0.5">Ready to crush your workout?</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-xl font-bold" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>
+                {currentUser ? getGreeting(currentUser.displayName) : "Welcome back"}
+              </h1>
+              <p className="text-muted-foreground text-sm mt-0.5">Ready to crush your workout?</p>
+            </div>
+            {streak > 0 && (
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="flex flex-col items-center px-3 py-1.5 bg-chart-4/10 rounded-xl border border-chart-4/20"
+              >
+                <Flame className="w-4 h-4 text-chart-4" />
+                <span className="text-sm font-bold text-chart-4 leading-none mt-0.5">{streak}</span>
+                <span className="text-[9px] text-chart-4/70">streak</span>
+              </motion.div>
+            )}
+          </div>
         </motion.div>
 
         {/* CTA Buttons */}
@@ -213,6 +325,44 @@ export default function Dashboard() {
             </Button>
           )}
         </motion.div>
+
+        {/* Saved Templates */}
+        {templates.length > 0 && (
+          <motion.div custom={1.5} variants={cardVariants} initial="hidden" animate="visible">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-2">
+                <Bookmark className="w-4 h-4 text-primary" />
+                <span className="text-sm font-semibold">Templates</span>
+              </div>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-1">
+              {templates.map((tpl: any) => (
+                <div key={tpl.id} className="flex-shrink-0 bg-card border border-border rounded-xl p-3 w-44">
+                  <div className="font-medium text-sm truncate mb-1">{tpl.name}</div>
+                  <div className="text-xs text-muted-foreground mb-3">{tpl.exercises?.length || 0} exercises</div>
+                  <div className="flex gap-1.5">
+                    <Button
+                      size="sm"
+                      className="flex-1 h-7 text-xs press-scale"
+                      onClick={() => quickStartTemplate(tpl)}
+                    >
+                      <Dumbbell className="w-3 h-3 mr-1" />Start
+                    </Button>
+                    <button
+                      onClick={() => {
+                        localCache.deleteTemplate(tpl.id);
+                        setTemplates(localCache.getTemplates());
+                      }}
+                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         {/* Weekly Stats */}
         <motion.div custom={2} variants={cardVariants} initial="hidden" animate="visible">
@@ -242,6 +392,43 @@ export default function Dashboard() {
             )}
           </div>
         </motion.div>
+
+        {/* Weakest Muscle Callout */}
+        {weakestMuscle && (
+          <motion.div custom={2.5} variants={cardVariants} initial="hidden" animate="visible">
+            <div className="bg-card border border-chart-4/30 rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-chart-4/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                <Target className="w-5 h-5 text-chart-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm">{weakestMuscle.muscle} needs attention</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {weakestMuscle.daysSince === 999 ? "Never trained" : `${weakestMuscle.daysSince} days since last session`}
+                </div>
+              </div>
+              <Button size="sm" onClick={() => navigate("/workout/new")} className="press-scale flex-shrink-0 text-xs h-8">
+                Train Now
+              </Button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Personal Best */}
+        {personalBest && personalBest.totalVolume > 0 && (
+          <motion.div custom={2.7} variants={cardVariants} initial="hidden" animate="visible">
+            <div className="bg-card border border-border rounded-2xl p-4 flex items-center gap-3">
+              <div className="w-10 h-10 bg-primary/10 rounded-xl flex items-center justify-center flex-shrink-0">
+                <Award className="w-5 h-5 text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm">Personal Best</div>
+                <div className="text-xs text-muted-foreground mt-0.5">
+                  {personalBest.planName} — {formatVolume(personalBest.totalVolume)} lbs total volume
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* AI Recommendations */}
         <motion.div custom={3} variants={cardVariants} initial="hidden" animate="visible">

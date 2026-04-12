@@ -8,7 +8,7 @@ import { localCache } from "@/lib/localCache";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Dumbbell, Clock, TrendingUp, ChevronDown, ChevronUp, Users, Brain, RotateCcw, UserPlus, Loader2 } from "lucide-react";
+import { Dumbbell, Clock, TrendingUp, ChevronDown, ChevronUp, Users, Brain, RotateCcw, UserPlus, Loader2, Bookmark } from "lucide-react";
 import type { WorkoutHistory } from "@shared/schema";
 
 const FILTERS = ["All", "This Week", "This Month"];
@@ -20,6 +20,30 @@ export default function History() {
   const [filter, setFilter] = useState("All");
   const [expanded, setExpanded] = useState<number | null>(null);
   const [redoing, setRedoing] = useState<number | null>(null);
+  const [savedTemplates, setSavedTemplates] = useState<Set<number>>(
+    new Set<number>(localCache.getTemplates().map((t: any) => t.sourceId as number).filter(Boolean))
+  );
+
+  const saveAsTemplate = async (w: WorkoutHistory) => {
+    try {
+      const plan = await apiRequest("GET", `/api/workout-plans/${w.planId}`).catch(() => null);
+      const exercises = plan?.exercises ? JSON.parse(plan.exercises) : [];
+      localCache.saveTemplate({
+        id: `tpl_${w.planId}`,
+        name: w.planName || "Workout",
+        exercises,
+        goal: plan?.goal || "Muscle Gain",
+        restBetweenSets: plan?.restBetweenSets || 90,
+        savedAt: new Date().toISOString(),
+        // @ts-ignore
+        sourceId: w.id,
+      } as any);
+      setSavedTemplates(prev => new Set(Array.from(prev).concat(w.id)));
+      toast({ title: "Saved as template!" });
+    } catch {
+      toast({ title: "Failed to save template", variant: "destructive" });
+    }
+  };
 
   const redoWorkout = async (w: WorkoutHistory, invite: boolean) => {
     if (!currentUser) return;
@@ -247,19 +271,29 @@ export default function History() {
                               </div>
                             ))}
                           </div>
-                          <Button
-                            onClick={() => redoWorkout(w, false)}
-                            disabled={redoing === w.id}
-                            className="w-full mt-3 press-scale"
-                            variant="outline"
-                          >
-                            {redoing === w.id ? (
-                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                            ) : (
-                              <RotateCcw className="w-4 h-4 mr-2" />
-                            )}
-                            Redo This Workout
-                          </Button>
+                          <div className="flex gap-2 mt-3">
+                            <Button
+                              onClick={() => redoWorkout(w, false)}
+                              disabled={redoing === w.id}
+                              className="flex-1 press-scale"
+                              variant="outline"
+                            >
+                              {redoing === w.id ? (
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              ) : (
+                                <RotateCcw className="w-4 h-4 mr-2" />
+                              )}
+                              Redo
+                            </Button>
+                            <Button
+                              onClick={() => saveAsTemplate(w)}
+                              variant="outline"
+                              className={`flex-1 press-scale ${savedTemplates.has(w.id) ? "text-primary border-primary/40" : ""}`}
+                            >
+                              <Bookmark className={`w-4 h-4 mr-2 ${savedTemplates.has(w.id) ? "fill-primary" : ""}`} />
+                              {savedTemplates.has(w.id) ? "Saved" : "Template"}
+                            </Button>
+                          </div>
                         </div>
                       </motion.div>
                     )}

@@ -52,6 +52,34 @@ export const localCache = {
     return getItem<any[]>("workout_plans") || [];
   },
 
+  // Custom exercises (device-local, merged with server exercises)
+  getCustomExercises(): any[] {
+    return getItem<any[]>("custom_exercises") || [];
+  },
+  saveCustomExercise(ex: { id: string; name: string; primaryMuscle: string; equipment: string; isCustom: boolean }) {
+    const all = this.getCustomExercises();
+    all.unshift(ex);
+    setItem("custom_exercises", all);
+  },
+  deleteCustomExercise(id: string) {
+    setItem("custom_exercises", this.getCustomExercises().filter((e: any) => e.id !== id));
+  },
+
+  // Workout templates (device-local)
+  saveTemplate(template: { id: string; name: string; exercises: any[]; goal: string; restBetweenSets: number; savedAt: string }) {
+    const all = this.getTemplates();
+    const idx = all.findIndex((t: any) => t.id === template.id);
+    if (idx >= 0) all[idx] = template;
+    else all.unshift(template);
+    setItem("templates", all.slice(0, 10)); // keep last 10
+  },
+  getTemplates(): any[] {
+    return getItem<any[]>("templates") || [];
+  },
+  deleteTemplate(id: string) {
+    setItem("templates", this.getTemplates().filter((t: any) => t.id !== id));
+  },
+
   // Clear everything (on logout)
   clearAll() {
     const keys = Object.keys(localStorage).filter(k => k.startsWith(PREFIX));

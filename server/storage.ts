@@ -450,4 +450,22 @@ export class DatabaseStorage implements IStorage {
   }
 }
 
-export const storage = new DatabaseStorage();
+// ── Export the right implementation ───────────────────────────────────────────
+// If DATABASE_URL is set, use PostgreSQL. Otherwise use SQLite.
+import { PgStorage } from "./storage-pg";
+
+let _storage: IStorage;
+
+if (process.env.DATABASE_URL) {
+  console.log("[storage] Using PostgreSQL (DATABASE_URL detected)");
+  const pgStore = new PgStorage();
+  pgStore.init().catch(err => {
+    console.error("[storage-pg] Failed to initialize schema:", err);
+    process.exit(1);
+  });
+  _storage = pgStore;
+} else {
+  _storage = new DatabaseStorage();
+}
+
+export const storage: IStorage = _storage;
