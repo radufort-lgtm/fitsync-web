@@ -8,10 +8,39 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { Edit2, Check, Dumbbell, Clock, TrendingUp, Target, LogOut } from "lucide-react";
+import { Edit2, Check, Dumbbell, Clock, TrendingUp, Target, LogOut, CalendarDays, Plus, Trash2, Library } from "lucide-react";
 import type { WorkoutHistory } from "@shared/schema";
 
 const GOALS = ["Strength", "Muscle Gain", "Fat Loss", "Performance", "General Fitness", "Flexibility"];
+
+function buildActivityCalendar(history: WorkoutHistory[]) {
+  const dayMap: Record<string, number> = {};
+  for (const h of history) {
+    const d = new Date(h.completedAt);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    dayMap[key] = (dayMap[key] || 0) + 1;
+  }
+  // Build 15 weeks (today's week + 14 prior), each column = a week, rows = Mon-Sun
+  const today = new Date();
+  // Align to the start of this week (Monday)
+  const dow = today.getDay(); // 0=Sun
+  const daysSinceMonday = dow === 0 ? 6 : dow - 1;
+  const thisMonday = new Date(today);
+  thisMonday.setDate(today.getDate() - daysSinceMonday);
+
+  const weeks: { date: Date; count: number; isFuture: boolean }[][] = [];
+  for (let w = 14; w >= 0; w--) {
+    const week: { date: Date; count: number; isFuture: boolean }[] = [];
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(thisMonday);
+      date.setDate(thisMonday.getDate() - w * 7 + d);
+      const key = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+      week.push({ date, count: dayMap[key] || 0, isFuture: date > today });
+    }
+    weeks.push(week);
+  }
+  return weeks;
+}
 
 function cmToFtIn(cm: number) {
   const totalIn = cm / 2.54;
@@ -30,6 +59,30 @@ export default function Profile() {
   const [editIn, setEditIn] = useState("10");
   const [editLbs, setEditLbs] = useState("165");
   const [editGoals, setEditGoals] = useState<string[]>([]);
+  const [customExercises, setCustomExercises] = useState<any[]>(() => localCache.getCustomExercises());
+  const [showAddEx, setShowAddEx] = useState(false);
+  const [newExName, setNewExName] = useState("");
+  const [newExMuscle, setNewExMuscle] = useState("Chest");
+  const [newExEquipment, setNewExEquipment] = useState("Barbell");
+
+  const MUSCLES = ["Chest", "Back", "Shoulders", "Biceps", "Triceps", "Quads", "Hamstrings", "Glutes", "Core", "Calves"];
+  const EQUIPMENT_OPTIONS = ["Barbell", "Dumbbell", "Cable", "Machine", "Bodyweight", "Kettlebell", "Resistance Band"];
+
+  const addCustomExercise = () => {
+    if (!newExName.trim()) return;
+    const ex = {
+      id: `custom_${Date.now()}`,
+      name: newExName.trim(),
+      primaryMuscle: newExMuscle,
+      equipment: newExEquipment,
+      isCustom: true,
+    };
+    localCache.saveCustomExercise(ex);
+    setCustomExercises(localCache.getCustomExercises());
+    setNewExName("");
+    setShowAddEx(false);
+    toast({ title: "Custom exercise added!" });
+  };
 
   const { data: history = [], isLoading: histLoading } = useQuery<WorkoutHistory[]>({
     queryKey: ["/api/users", currentUser?.id, "workout-history"],
@@ -95,6 +148,14 @@ export default function Profile() {
   }
   const muscleEntries = Object.entries(muscleCounts).sort(([, a], [, b]) => b - a);
   const maxCount = Math.max(...Object.values(muscleCounts), 1);
+  const favMuscle = muscleEntries[0]?.[0] || null;
+  const activityCalendar = buildActivityCalendar(history);
+  const totalSetsReal = history.reduce((s, h) => {
+    try {
+      const logs = JSON.parse(h.exerciseLogs || "[]");
+      return s + logs.reduce((a: number, l: any) => a + (l.setsCompleted || 0), 0);
+    } catch { return s; }
+  }, 0);
 
   const daysSince = (m: string) => {
     if (!muscleLastTrained[m]) return null;
@@ -215,20 +276,139 @@ export default function Profile() {
         {/* Performance Summary */}
         <div className="bg-card border border-border rounded-2xl p-4">
           <div className="text-sm font-semibold mb-3">Performance Summary</div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-2">
             {[
-              { label: "Total Volume", value: totalVolume >= 1000 ? `${(totalVolume / 1000).toFixed(1)}k` : String(Math.round(totalVolume)), unit: "lbs", icon: TrendingUp },
-              { label: "Total Time", value: String(Math.floor(totalTime / 60)), unit: "min", icon: Clock },
-              { label: "Total Sets", value: String(totalSets), unit: "sets", icon: Dumbbell },
+              { label: "Workouts", value: String(history.length), unit: "total", icon: Dumbbell },
+              { label: "Volume", value: totalVolume >= 1000 ? `${(totalVolume / 1000).toFixed(1)}k` : String(Math.round(totalVolume)), unit: "lbs", icon: TrendingUp },
+              { label: "Time", value: String(Math.floor(totalTime / 60)), unit: "min", icon: Clock },
+              { label: "Fav Muscle", value: favMuscle || "—", unit: "group", icon: Target },
             ].map(({ label, value, unit, icon: Icon }) => (
               <div key={label} className="text-center">
                 <Icon className="w-4 h-4 text-primary mx-auto mb-1" />
-                <div className="font-bold text-base" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>{value}</div>
+                <div className="font-bold text-sm truncate" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>{value}</div>
                 <div className="text-[9px] text-muted-foreground">{unit}</div>
-                <div className="text-[9px] text-muted-foreground">{label}</div>
+                <div className="text-[9px] text-muted-foreground leading-tight">{label}</div>
               </div>
             ))}
           </div>
+        </div>
+
+        {/* Activity Calendar */}
+        {history.length > 0 && (
+          <div className="bg-card border border-border rounded-2xl p-4">
+            <div className="flex items-center gap-2 mb-3">
+              <CalendarDays className="w-4 h-4 text-primary" />
+              <span className="text-sm font-semibold">Activity</span>
+              <span className="text-xs text-muted-foreground ml-auto">15 weeks</span>
+            </div>
+            <div className="flex gap-1 overflow-x-auto pb-1">
+              {activityCalendar.map((week, wi) => (
+                <div key={wi} className="flex flex-col gap-1 flex-shrink-0">
+                  {week.map((day, di) => (
+                    <div
+                      key={di}
+                      title={day.date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      className={`w-3.5 h-3.5 rounded-sm transition-colors ${
+                        day.isFuture ? "bg-border/20" :
+                        day.count === 0 ? "bg-secondary" :
+                        day.count === 1 ? "bg-primary/40" :
+                        "bg-primary"
+                      }`}
+                    />
+                  ))}
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5 mt-2">
+              <span className="text-[10px] text-muted-foreground">Less</span>
+              {["bg-secondary", "bg-primary/40", "bg-primary"].map((c, i) => (
+                <div key={i} className={`w-3 h-3 rounded-sm ${c}`} />
+              ))}
+              <span className="text-[10px] text-muted-foreground">More</span>
+            </div>
+          </div>
+        )}
+
+        {/* Custom Exercise Library */}
+        <div className="bg-card border border-border rounded-2xl p-4">
+          <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center gap-2">
+              <Library className="w-4 h-4 text-primary" />
+              <span className="text-sm font-semibold">My Exercises</span>
+            </div>
+            <button
+              onClick={() => setShowAddEx(!showAddEx)}
+              className="flex items-center gap-1 text-xs text-primary font-medium hover:opacity-80 transition-opacity"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </button>
+          </div>
+
+          {showAddEx && (
+            <div className="bg-background rounded-xl p-3 mb-3 space-y-3 border border-border">
+              <div>
+                <label className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1 block">Exercise Name</label>
+                <Input
+                  placeholder="e.g. Incline Dumbbell Curl"
+                  value={newExName}
+                  onChange={e => setNewExName(e.target.value)}
+                  className="bg-card h-9 text-sm"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1 block">Muscle</label>
+                  <select
+                    value={newExMuscle}
+                    onChange={e => setNewExMuscle(e.target.value)}
+                    className="w-full h-9 rounded-lg border border-border bg-card text-sm px-2"
+                  >
+                    {MUSCLES.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[10px] text-muted-foreground uppercase tracking-wide mb-1 block">Equipment</label>
+                  <select
+                    value={newExEquipment}
+                    onChange={e => setNewExEquipment(e.target.value)}
+                    className="w-full h-9 rounded-lg border border-border bg-card text-sm px-2"
+                  >
+                    {EQUIPMENT_OPTIONS.map(e => <option key={e} value={e}>{e}</option>)}
+                  </select>
+                </div>
+              </div>
+              <Button onClick={addCustomExercise} size="sm" className="w-full h-8">
+                <Check className="w-3.5 h-3.5 mr-1" /> Save Exercise
+              </Button>
+            </div>
+          )}
+
+          {customExercises.length === 0 ? (
+            <p className="text-xs text-muted-foreground text-center py-3">
+              No custom exercises yet. Add your own movements!
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {customExercises.map((ex: any) => (
+                <div key={ex.id} className="flex items-center gap-3 p-2 bg-secondary/50 rounded-xl">
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium truncate">{ex.name}</div>
+                    <div className="text-[10px] text-muted-foreground">{ex.primaryMuscle} · {ex.equipment}</div>
+                  </div>
+                  <button
+                    onClick={() => {
+                      localCache.deleteCustomExercise(ex.id);
+                      setCustomExercises(localCache.getCustomExercises());
+                    }}
+                    className="w-7 h-7 flex items-center justify-center rounded-lg bg-destructive/10 text-destructive hover:bg-destructive/20 transition-colors flex-shrink-0"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Log Out */}

@@ -10,8 +10,8 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import {
   Play, Pause, Square, SkipForward, Trophy, Check,
-  ChevronRight, Timer, X, Wifi, Users, Clock, Loader2,
-  UserCheck, UserX, Dumbbell, Repeat, Volume2
+  ChevronRight, ChevronLeft, Timer, X, Wifi, Users, Clock, Loader2,
+  UserCheck, UserX, Dumbbell, Repeat, Volume2, Plus, Minus, Zap
 } from "lucide-react";
 import type { PlannedExercise, SetLog } from "@shared/schema";
 
@@ -133,6 +133,11 @@ export default function WorkoutActive() {
   const [transitionTarget, setTransitionTarget] = useState<"rest" | "active">((_saved.current?.transitionTarget as "rest" | "active") || "rest");
   // Track all user weights for display: { username: { stationIdx: weight } }
   const [userWeights, setUserWeights] = useState<Record<string, Record<number, string>>>({});
+  // Per-exercise set completion tracking: exerciseName -> sets completed
+  const [completedSets, setCompletedSets] = useState<Record<string, number>>({});
+  // Motivational message overlay
+  const [motivText, setMotivText] = useState<string | null>(null);
+  const motivShownRef = useRef(new Set<number>());
 
 
   // Timers
@@ -398,7 +403,7 @@ export default function WorkoutActive() {
 
     if (phase === "active") {
       timerRef.current = setInterval(() => {
-        setSetSecsLeft(prev => {
+        setSetSecsLeft((prev: number) => {
           if (prev <= 1) {
             // Time's up! Play alarm and go to transition → rest
             playAlarm();
@@ -410,11 +415,11 @@ export default function WorkoutActive() {
           }
           return prev - 1;
         });
-        setElapsedSecs(s => s + 1);
+        setElapsedSecs((s: number) => s + 1);
       }, 1000);
     } else if (phase === "transition") {
       timerRef.current = setInterval(() => {
-        setTransitionSecsLeft(prev => {
+        setTransitionSecsLeft((prev: number) => {
           if (prev <= 1) {
             // Transition done — go to target phase
             const target = stateRef.current.transitionTarget;
@@ -435,7 +440,7 @@ export default function WorkoutActive() {
       }, 1000);
     } else if (phase === "rest") {
       timerRef.current = setInterval(() => {
-        setRestSecsLeft(prev => {
+        setRestSecsLeft((prev: number) => {
           if (prev <= 1) {
             // Break done → transition → next round
             playAlarm();
@@ -533,12 +538,12 @@ export default function WorkoutActive() {
     if (phase === "active" || phase === "transition" || phase === "rest") {
       localTimerRef.current = setInterval(() => {
         if (phase === "active") {
-          setSetSecsLeft(prev => Math.max(0, prev - 1));
-          setElapsedSecs(s => s + 1);
+          setSetSecsLeft((prev: number) => Math.max(0, prev - 1));
+          setElapsedSecs((s: number) => s + 1);
         } else if (phase === "transition") {
-          setTransitionSecsLeft(prev => Math.max(0, prev - 1));
+          setTransitionSecsLeft((prev: number) => Math.max(0, prev - 1));
         } else if (phase === "rest") {
-          setRestSecsLeft(prev => Math.max(0, prev - 1));
+          setRestSecsLeft((prev: number) => Math.max(0, prev - 1));
         }
       }, 1000);
     } else {
@@ -557,6 +562,27 @@ export default function WorkoutActive() {
       if (wakeLockRef.current) { wakeLockRef.current.release().catch(() => {}); wakeLockRef.current = null; }
     };
   }, []);
+
+  // Motivational messages at key countdown milestones
+  useEffect(() => {
+    if (phase !== "active") {
+      motivShownRef.current.clear();
+      return;
+    }
+    const MESSAGES: { at: number; text: string }[] = [
+      { at: 90, text: "Halfway there — keep pushing!" },
+      { at: 30, text: "30 seconds left — finish strong!" },
+      { at: 10, text: "Last 10 seconds — give it everything!" },
+    ];
+    for (const { at, text } of MESSAGES) {
+      if (setSecsLeft === at && !motivShownRef.current.has(at)) {
+        motivShownRef.current.add(at);
+        setMotivText(text);
+        const t = setTimeout(() => setMotivText(null), 2500);
+        return () => clearTimeout(t);
+      }
+    }
+  }, [setSecsLeft, phase]);
 
   if (!activeWorkout || !currentUser) return null;
 
@@ -632,14 +658,27 @@ export default function WorkoutActive() {
         completedAt: new Date().toISOString(),
       });
       const muscles = Array.from(new Set(exercises.map(e => e.primaryMuscle)));
+      const logEntries = exercises.map((ex, idx) => ({
+        exerciseName: ex.exerciseName,
+        setsCompleted: completedSets[ex.exerciseName] || 0,
+        plannedSets: ex.sets,
+        weight: userWeights[currentUser.username]?.[idx] || "0",
+      }));
+      // Estimate total volume from logged sets
+      const estimatedVolume = exercises.reduce((sum, ex, idx) => {
+        const w = parseFloat(userWeights[currentUser.username]?.[idx] || "0") || 0;
+        const done = completedSets[ex.exerciseName] || 0;
+        const reps = ex.reps || 10;
+        return sum + w * done * reps;
+      }, 0);
       const historyEntry = await apiRequest("POST", "/api/workout-history", {
         userId: currentUser.id,
         planId: activeWorkout.planId,
         planName: activeWorkout.planName,
-        totalVolume: 0,
+        totalVolume: estimatedVolume,
         duration: elapsedSecs,
         musclesWorked: JSON.stringify(muscles),
-        exerciseLogs: JSON.stringify([]),
+        exerciseLogs: JSON.stringify(logEntries),
         wasShared: activeWorkout.isShared,
         participantCount: activeWorkout.participantUsernames.length,
         aiReasoning: activeWorkout.aiReasoning,
@@ -671,6 +710,35 @@ export default function WorkoutActive() {
       sendStateUpdate({ phase: resumePhase, setSecsLeft: resumeSecsLeft });
       await apiRequest("PATCH", `/api/workout-sessions/${activeWorkout.sessionId}`, { isPaused: false, status: "active" }).catch(() => {});
     }
+  };
+
+  const extendRest = () => {
+    if (!isCreator) return;
+    const newSecs = restSecsLeft + 30;
+    setRestSecsLeft(newSecs);
+    sendStateUpdate({ restSecsLeft: newSecs });
+  };
+
+  const skipRest = () => {
+    if (!isCreator) return;
+    playAlarm();
+    const nextRound = currentRound + 1;
+    if (nextRound >= totalRounds) {
+      setPhase("complete");
+      sendStateUpdate({ phase: "complete", restSecsLeft: 0, playAlarm: true });
+      return;
+    }
+    const nextRotation = Math.floor(nextRound / totalStations);
+    setCurrentRound(nextRound);
+    setCurrentRotation(nextRotation);
+    setPhase("transition");
+    setTransitionTarget("active");
+    setTransitionSecsLeft(TRANSITION_DURATION);
+    sendStateUpdate({
+      phase: "transition", transitionTarget: "active",
+      transitionSecsLeft: TRANSITION_DURATION, restSecsLeft: 0,
+      currentRound: nextRound, currentRotation: nextRotation, playAlarm: true,
+    });
   };
 
   const [showEndDialog, setShowEndDialog] = useState(false);
@@ -906,8 +974,28 @@ export default function WorkoutActive() {
                 {weight !== "0" && <div className="text-sm text-muted-foreground mt-2">{weight} lbs</div>}
               </div>
 
-              {/* Big countdown */}
-              <div className="relative w-44 h-44 mb-6">
+              {/* Motivational message */}
+              <AnimatePresence>
+                {motivText && (
+                  <motion.div
+                    key={motivText}
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    className="flex items-center gap-2 px-4 py-2 bg-chart-3/15 border border-chart-3/30 rounded-xl mb-3 text-chart-3 text-sm font-medium"
+                  >
+                    <Zap className="w-4 h-4 flex-shrink-0" />
+                    {motivText}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Big countdown — pulses last 10 seconds */}
+              <motion.div
+                className="relative w-44 h-44 mb-4"
+                animate={setSecsLeft <= 10 && setSecsLeft > 0 ? { scale: [1, 1.06, 1] } : { scale: 1 }}
+                transition={setSecsLeft <= 10 && setSecsLeft > 0 ? { repeat: Infinity, duration: 0.6, ease: "easeInOut" } : {}}
+              >
                 <svg viewBox="0 0 120 120" className="w-44 h-44 rotate-[-90deg]">
                   <circle cx="60" cy="60" r="54" strokeWidth="6" stroke="hsl(195 8% 18%)" fill="none" />
                   <motion.circle
@@ -927,6 +1015,30 @@ export default function WorkoutActive() {
                     {formatTime(setSecsLeft)}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">remaining</div>
+                </div>
+              </motion.div>
+
+              {/* Set tracker */}
+              <div className="flex items-center justify-center gap-3 mb-4">
+                <span className="text-xs text-muted-foreground">Sets:</span>
+                <div className="flex gap-2">
+                  {Array.from({ length: myExercise.sets || 3 }).map((_, i) => {
+                    const done = (completedSets[myExercise.exerciseName] || 0) > i;
+                    return (
+                      <button
+                        key={i}
+                        onClick={() => setCompletedSets(prev => {
+                          const cur = prev[myExercise.exerciseName] || 0;
+                          return { ...prev, [myExercise.exerciseName]: cur > i ? i : i + 1 };
+                        })}
+                        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all press-scale ${
+                          done ? "bg-primary border-primary" : "border-border bg-transparent"
+                        }`}
+                      >
+                        {done && <Check className="w-3.5 h-3.5 text-primary-foreground" />}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -959,12 +1071,35 @@ export default function WorkoutActive() {
                 <ChevronRight className="w-10 h-10 text-primary" />
               </div>
               <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">
-                {transitionTarget === "rest" ? "Transitioning to Break" : "Get Ready"}
+                {transitionTarget === "rest" ? "Transitioning to Break" : "Get Ready — Move Now!"}
               </div>
               <div className="text-5xl font-bold text-primary mb-2 tabular-nums" style={{ fontFamily: "'Cabinet Grotesk', monospace" }}>
                 {transitionSecsLeft}
               </div>
               <div className="text-sm text-muted-foreground">seconds</div>
+
+              {/* Station direction arrow for active transitions */}
+              {transitionTarget === "active" && (
+                <div className="mt-6 flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-3 px-4 py-3 bg-card border border-border rounded-2xl">
+                    <div className="text-right">
+                      <div className="text-xs text-muted-foreground">Current</div>
+                      <div className="font-semibold text-sm">{myExercise?.exerciseName || "—"}</div>
+                    </div>
+                    <div className="flex flex-col items-center">
+                      <ChevronRight className="w-6 h-6 text-primary" />
+                    </div>
+                    <div className="text-left">
+                      <div className="text-xs text-muted-foreground">Next</div>
+                      <div className="font-semibold text-sm text-primary">
+                        {currentRound + 1 < totalRounds
+                          ? exercises[getStationIndex(myParticipantIdx >= 0 ? myParticipantIdx : 0, currentRound + 1, totalStations)]?.exerciseName || "—"
+                          : "Finish!"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
             </motion.div>
           )}
 
@@ -979,7 +1114,7 @@ export default function WorkoutActive() {
               </div>
 
               {/* Circular countdown */}
-              <div className="relative w-36 h-36 mb-6">
+              <div className="relative w-36 h-36 mb-4">
                 <svg viewBox="0 0 120 120" className="w-36 h-36 rotate-[-90deg]">
                   <circle cx="60" cy="60" r="54" strokeWidth="6" stroke="hsl(195 8% 18%)" fill="none" />
                   <motion.circle
@@ -996,6 +1131,26 @@ export default function WorkoutActive() {
                   <div className="text-xs text-muted-foreground">seconds</div>
                 </div>
               </div>
+
+              {/* Skip / Extend rest buttons — creator only */}
+              {isCreator && (
+                <div className="flex gap-3 mb-4">
+                  <button
+                    onClick={extendRest}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-secondary rounded-xl border border-border text-sm font-medium press-scale hover:border-primary/40 transition-colors"
+                  >
+                    <Plus className="w-4 h-4 text-primary" />
+                    +30s
+                  </button>
+                  <button
+                    onClick={skipRest}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-secondary rounded-xl border border-border text-sm font-medium press-scale hover:border-primary/40 transition-colors"
+                  >
+                    <SkipForward className="w-4 h-4 text-primary" />
+                    Skip Rest
+                  </button>
+                </div>
+              )}
 
               {/* Show what's next */}
               {nextExercise ? (

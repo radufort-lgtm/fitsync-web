@@ -134,17 +134,28 @@ export default function NotificationBell() {
       <SheetTrigger asChild>
         <button
           data-testid="button-notifications"
-          className="relative w-9 h-9 flex items-center justify-center rounded-xl bg-secondary text-muted-foreground hover:text-foreground transition-colors press-scale"
+          className={`relative w-9 h-9 flex items-center justify-center rounded-xl transition-colors press-scale ${
+            unreadCount > 0
+              ? "bg-primary/15 text-primary hover:bg-primary/25"
+              : "bg-secondary text-muted-foreground hover:text-foreground"
+          }`}
         >
           <Bell className="w-4 h-4" />
           {unreadCount > 0 && (
-            <motion.span
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center"
-            >
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </motion.span>
+            <>
+              <motion.span
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-1"
+              >
+                {unreadCount > 9 ? "9+" : unreadCount}
+              </motion.span>
+              <motion.span
+                animate={{ scale: [1, 1.5, 1], opacity: [0.6, 0, 0] }}
+                transition={{ repeat: Infinity, duration: 2, ease: "easeOut" }}
+                className="absolute -top-1 -right-1 w-[18px] h-[18px] bg-red-500 rounded-full"
+              />
+            </>
           )}
         </button>
       </SheetTrigger>
