@@ -1018,30 +1018,6 @@ export default function WorkoutActive() {
                 </div>
               </motion.div>
 
-              {/* Set tracker */}
-              <div className="flex items-center justify-center gap-3 mb-4">
-                <span className="text-xs text-muted-foreground">Sets:</span>
-                <div className="flex gap-2">
-                  {Array.from({ length: myExercise.sets || 3 }).map((_, i) => {
-                    const done = (completedSets[myExercise.exerciseName] || 0) > i;
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => setCompletedSets(prev => {
-                          const cur = prev[myExercise.exerciseName] || 0;
-                          return { ...prev, [myExercise.exerciseName]: cur > i ? i : i + 1 };
-                        })}
-                        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all press-scale ${
-                          done ? "bg-primary border-primary" : "border-border bg-transparent"
-                        }`}
-                      >
-                        {done && <Check className="w-3.5 h-3.5 text-primary-foreground" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
               {/* Who is doing what */}
               {isShared && (
                 <div className="w-full bg-card border border-border rounded-xl p-3 mt-2">
