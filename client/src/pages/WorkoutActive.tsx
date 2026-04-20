@@ -913,7 +913,7 @@ export default function WorkoutActive() {
 
               <div className="bg-card border border-border rounded-2xl p-5">
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3 block text-center">
-                  Enter your weight (lbs)
+                  How much weight are you lifting? (lbs)
                 </label>
                 <Input
                   type="number"
@@ -924,7 +924,7 @@ export default function WorkoutActive() {
                   placeholder="0"
                 />
                 <p className="text-xs text-muted-foreground text-center">
-                  You'll work out for 3 minutes at this station
+                  Enter 0 for bodyweight exercises
                 </p>
               </div>
 
