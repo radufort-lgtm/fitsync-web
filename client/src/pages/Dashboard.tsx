@@ -237,6 +237,9 @@ export default function Dashboard() {
         participantUsernames: [currentUser.username],
         restBetweenSets: tpl.restBetweenSets || 90,
         aiReasoning: "",
+        breakDuration: tpl.restBetweenSets || 90,
+        rotationCount: 1,
+        targetDuration: 45,
       });
       navigate("/workout/active");
     } catch {

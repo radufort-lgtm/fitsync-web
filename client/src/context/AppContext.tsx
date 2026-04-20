@@ -16,6 +16,7 @@ interface ActiveWorkout {
   aiReasoning: string;
   breakDuration?: number;
   rotationCount?: number;
+  targetDuration?: number;
 }
 
 interface PendingInvite {

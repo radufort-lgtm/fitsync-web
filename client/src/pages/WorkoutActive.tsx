@@ -591,6 +591,13 @@ export default function WorkoutActive() {
   const rotationCount = activeWorkout.rotationCount || 1;
   const totalRounds = totalStations * rotationCount;
   const breakDuration = activeWorkout.breakDuration || activeWorkout.restBetweenSets || 60;
+
+  // Compute per-station time from the user's chosen total duration.
+  // Formula: totalTime = N*(setDuration + breakDuration + 20) - 10  →  solve for setDuration
+  const targetSecs = (activeWorkout.targetDuration || 0) * 60;
+  const setDuration = targetSecs > 0 && totalRounds > 0
+    ? Math.max(30, Math.floor((targetSecs + 10) / totalRounds - breakDuration - 20))
+    : SET_DURATION;
   const isCreator = activeWorkout.creatorUsername === currentUser.username;
   const isShared = activeWorkout.isShared;
   const participants = activeWorkout.participantUsernames;
@@ -629,10 +636,9 @@ export default function WorkoutActive() {
   };
 
   const startRound = () => {
-    // Creator presses to start the timed 3 min set
-    setSetSecsLeft(SET_DURATION);
+    setSetSecsLeft(setDuration);
     setPhase("active");
-    sendStateUpdate({ phase: "active", setSecsLeft: SET_DURATION });
+    sendStateUpdate({ phase: "active", setSecsLeft: setDuration });
   };
 
   const submitWeight = () => {
@@ -704,8 +710,8 @@ export default function WorkoutActive() {
     } else if (phase === "paused") {
       const resumePhase = prevPhaseRef.current;
       // If resuming to active but the timer ran out (setSecsLeft is 0), reset it so the set runs properly
-      const resumeSecsLeft = (resumePhase === "active" && setSecsLeft <= 0) ? SET_DURATION : setSecsLeft;
-      if (resumePhase === "active" && setSecsLeft <= 0) setSetSecsLeft(SET_DURATION);
+      const resumeSecsLeft = (resumePhase === "active" && setSecsLeft <= 0) ? setDuration : setSecsLeft;
+      if (resumePhase === "active" && setSecsLeft <= 0) setSetSecsLeft(setDuration);
       setPhase(resumePhase);
       sendStateUpdate({ phase: resumePhase, setSecsLeft: resumeSecsLeft });
       await apiRequest("PATCH", `/api/workout-sessions/${activeWorkout.sessionId}`, { isPaused: false, status: "active" }).catch(() => {});
@@ -830,7 +836,7 @@ export default function WorkoutActive() {
                   <span className="flex items-center gap-1"><Repeat className="w-3 h-3" />{rotationCount}x rotation</span>
                   {isShared && <span className="flex items-center gap-1"><Users className="w-3 h-3" />{participants.length} people</span>}
                 </div>
-                <div className="text-[10px] text-muted-foreground mt-2">3 min per station · {breakDuration}s break</div>
+                <div className="text-[10px] text-muted-foreground mt-2">{formatTime(setDuration)} per station · {breakDuration}s break</div>
               </div>
 
               {isShared && invitedFriends.length > 0 && (
@@ -913,7 +919,7 @@ export default function WorkoutActive() {
 
               <div className="bg-card border border-border rounded-2xl p-5">
                 <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3 block text-center">
-                  Enter your weight (lbs)
+                  How much weight are you lifting? (lbs)
                 </label>
                 <Input
                   type="number"
@@ -924,7 +930,7 @@ export default function WorkoutActive() {
                   placeholder="0"
                 />
                 <p className="text-xs text-muted-foreground text-center">
-                  You'll work out for 3 minutes at this station
+                  Enter 0 for bodyweight exercises
                 </p>
               </div>
 
@@ -949,7 +955,7 @@ export default function WorkoutActive() {
               {isCreator ? (
                 <Button onClick={() => { submitWeight(); startRound(); }} size="lg" className="w-full press-scale glow-primary h-14">
                   <Play className="w-5 h-5 mr-2" />
-                  Start Round — 3:00
+                  Start Round — {formatTime(setDuration)}
                 </Button>
               ) : (
                 <div className="text-center">
@@ -1004,7 +1010,7 @@ export default function WorkoutActive() {
                     stroke={setSecsLeft <= 10 ? "hsl(0 80% 60%)" : "hsl(186 50% 70%)"}
                     fill="none"
                     strokeDasharray={circumference}
-                    strokeDashoffset={circumference * (1 - setSecsLeft / SET_DURATION)}
+                    strokeDashoffset={circumference * (1 - setSecsLeft / setDuration)}
                     strokeLinecap="round"
                     transition={{ duration: 0.5 }}
                   />
@@ -1017,30 +1023,6 @@ export default function WorkoutActive() {
                   <div className="text-xs text-muted-foreground mt-1">remaining</div>
                 </div>
               </motion.div>
-
-              {/* Set tracker */}
-              <div className="flex items-center justify-center gap-3 mb-4">
-                <span className="text-xs text-muted-foreground">Sets:</span>
-                <div className="flex gap-2">
-                  {Array.from({ length: myExercise.sets || 3 }).map((_, i) => {
-                    const done = (completedSets[myExercise.exerciseName] || 0) > i;
-                    return (
-                      <button
-                        key={i}
-                        onClick={() => setCompletedSets(prev => {
-                          const cur = prev[myExercise.exerciseName] || 0;
-                          return { ...prev, [myExercise.exerciseName]: cur > i ? i : i + 1 };
-                        })}
-                        className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all press-scale ${
-                          done ? "bg-primary border-primary" : "border-border bg-transparent"
-                        }`}
-                      >
-                        {done && <Check className="w-3.5 h-3.5 text-primary-foreground" />}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
 
               {/* Who is doing what */}
               {isShared && (

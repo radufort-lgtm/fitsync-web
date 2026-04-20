@@ -266,6 +266,7 @@ export default function WorkoutNew() {
         aiReasoning: generatedPlan.aiReasoning,
         breakDuration: config.breakDuration,
         rotationCount: config.rotationCount,
+        targetDuration: config.duration,
       });
 
       navigate("/workout/active");
@@ -284,6 +285,15 @@ export default function WorkoutNew() {
 
   const actual = getActualStep(step);
   const currentStepLabel = stepLabels[step];
+
+  // Compute per-station duration from user's chosen total time (same formula as WorkoutActive)
+  const stationCount = generatedPlan?.exercises.length || 0;
+  const totalRoundsPreview = stationCount * config.rotationCount;
+  const targetSecsPreview = config.duration * 60;
+  const setDurationPreview = totalRoundsPreview > 0
+    ? Math.max(30, Math.floor((targetSecsPreview + 10) / totalRoundsPreview - config.breakDuration - 20))
+    : 180;
+  const fmtDuration = (s: number) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -709,7 +719,7 @@ export default function WorkoutNew() {
                   <h2 className="text-xl font-bold mb-1" style={{ fontFamily: "'Cabinet Grotesk', sans-serif" }}>Pick Stations</h2>
                   <p className="text-muted-foreground text-sm">
                     {generating ? "Generating your workout..." :
-                     generatedPlan ? `${generatedPlan.exercises.length} stations — each station = 3 min of work.` :
+                     generatedPlan ? `${generatedPlan.exercises.length} stations — each station = ${fmtDuration(setDurationPreview)} of work.` :
                      "Loading..."}
                   </p>
                 </div>
@@ -857,7 +867,7 @@ export default function WorkoutNew() {
                         <span className="text-xs font-semibold text-primary uppercase tracking-wide">Rotation Format</span>
                       </div>
                       <p className="text-sm text-muted-foreground leading-relaxed">
-                        3 min per station · {config.breakDuration}s break · {config.rotationCount} full rotation{config.rotationCount > 1 ? "s" : ""} · Everyone starts at a different station
+                        {fmtDuration(setDurationPreview)} per station · {config.breakDuration}s break · {config.rotationCount} full rotation{config.rotationCount > 1 ? "s" : ""} · Everyone starts at a different station
                       </p>
                     </div>
 
@@ -889,7 +899,7 @@ export default function WorkoutNew() {
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="font-medium text-sm truncate">{ex.exerciseName}</div>
-                              <div className="text-xs text-muted-foreground">{ex.primaryMuscle} · 3 min</div>
+                              <div className="text-xs text-muted-foreground">{ex.primaryMuscle} · {fmtDuration(setDurationPreview)}</div>
                             </div>
                             <button
                               onClick={() => removeExerciseFromPlan(ex.exerciseId)}
