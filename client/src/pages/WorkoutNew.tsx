@@ -266,6 +266,7 @@ export default function WorkoutNew() {
         aiReasoning: generatedPlan.aiReasoning,
         breakDuration: config.breakDuration,
         rotationCount: config.rotationCount,
+        targetDuration: config.duration,
       });
 
       navigate("/workout/active");
