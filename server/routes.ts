@@ -136,9 +136,9 @@ export async function registerRoutes(
 
   // Seed exercises on startup
   const exerciseCount = await storage.getExerciseCount();
-  if (exerciseCount === 0) {
+  if (exerciseCount < SEED_EXERCISES.length) {
     await storage.seedExercises(SEED_EXERCISES);
-    console.log(`✅ Seeded ${SEED_EXERCISES.length} exercises`);
+    console.log(`✅ Seeded/updated exercises (${exerciseCount} → ${SEED_EXERCISES.length})`);
   }
 
   // ── Auth / Login ──────────────────────────────────────────────────────────

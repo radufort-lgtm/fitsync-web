@@ -368,8 +368,12 @@ export class DatabaseStorage implements IStorage {
   }
 
   async seedExercises(exerciseList: InsertExercise[]): Promise<void> {
+    const existing = db.select({ name: exercises.name }).from(exercises).all();
+    const existingNames = new Set(existing.map(e => e.name));
     for (const ex of exerciseList) {
-      db.insert(exercises).values(ex).run();
+      if (!existingNames.has(ex.name)) {
+        db.insert(exercises).values(ex).run();
+      }
     }
   }
 

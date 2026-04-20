@@ -313,11 +313,15 @@ export class PgStorage implements IStorage {
     return this.getAllExercises();
   }
   async seedExercises(list: InsertExercise[]) {
+    const { rows: existing } = await pool.query("SELECT name FROM exercises");
+    const existingNames = new Set(existing.map((r: any) => r.name));
     for (const ex of list) {
-      await pool.query(
-        "INSERT INTO exercises (name,primary_muscle,secondary_muscles,equipment,workout_types,is_compound,instructions) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT DO NOTHING",
-        [ex.name, ex.primaryMuscle, ex.secondaryMuscles || "[]", ex.equipment || "[]", ex.workoutTypes || "[]", ex.isCompound ?? false, ex.instructions || ""]
-      );
+      if (!existingNames.has(ex.name)) {
+        await pool.query(
+          "INSERT INTO exercises (name,primary_muscle,secondary_muscles,equipment,workout_types,is_compound,instructions) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+          [ex.name, ex.primaryMuscle, ex.secondaryMuscles || "[]", ex.equipment || "[]", ex.workoutTypes || "[]", ex.isCompound ?? false, ex.instructions || ""]
+        );
+      }
     }
   }
   async getExerciseCount() {
